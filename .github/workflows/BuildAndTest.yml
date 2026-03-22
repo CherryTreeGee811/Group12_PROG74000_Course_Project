@@ -23,11 +23,6 @@ jobs:
       run: 
         docker compose up -d
 
-    - name: List Directories
-      shell: bash
-      run: 
-        ls -la
-
     - name: Wait for API and perform health check
       shell: bash
       run: |
