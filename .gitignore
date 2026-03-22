@@ -1,0 +1,48 @@
+# ============================================================
+# .gitignore — Stock Price Prediction Engine
+# ============================================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# --- Virtual environment ---
+venv/
+env/
+.venv/
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Generated data files (cached CSVs) ---
+data/cache/*.csv
+
+# --- Trained model artifacts ---
+models/saved/*.pkl
+models/saved/*.h5
+models/saved/*.csv
+
+# --- Generated charts ---
+models/charts/*.png
+
+# --- Environment secrets ---
+.env
+
+# --- Project requirements spec (not needed in repo) ---
+REQUIREMENTS.md
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/

@@ -1,0 +1,22 @@
+# Stock Price Prediction Engine — Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# --- Data fetching ---
+yfinance
+
+# --- Data processing ---
+pandas
+numpy
+
+# --- Traditional ML ---
+scikit-learn
+xgboost
+
+# --- Configuration ---
+pyyaml
+
+# --- API ---
+flask
+
+# --- ML Flow Tracking ---
+mlflow

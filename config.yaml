@@ -1,0 +1,66 @@
+# ============================================================
+# Stock Price Prediction Engine — Configuration
+# ============================================================
+# All tunable parameters live here. No magic numbers in code.
+
+# ------ Data Fetching ------
+data:
+  # Number of recent trading days to fetch for live prediction.
+  # Must be >= 300 so all indicators (SMA_200, 60-day LSTM window) compute correctly.
+  prediction_lookback_days: 300
+
+  # Maximum history period for training data download via yfinance.
+  # "max" fetches everything available for the ticker.
+  training_history_period: "max"
+
+  # Default tickers used for training the generalized model.
+  training_tickers:
+    - "AAPL"
+    - "GOOGL"
+
+# ------ Technical Indicators ------
+indicators:
+  sma_windows: [10, 50]
+  ema_windows: [12, 26]
+  macd_signal_window: 9
+  rsi_window: 14
+  bollinger_window: 20
+  bollinger_std: 2
+  atr_window: 14
+  lag_close_days: 10      # Lag_Close_1 through Lag_Close_10
+  lag_volume_days: 5      # Lag_Volume_1 through Lag_Volume_5
+
+# ------ Data Split (chronological, never shuffled) ------
+split:
+  train_ratio: 0.80
+  val_ratio: 0.10
+  test_ratio: 0.10
+
+# ------ Model: Logistic Regression ------
+logistic_regression:
+  max_iter: 1000
+  random_state: 42
+
+# ------ Model: XGBoost ------
+xgboost:
+  random_state: 42
+  # Grid search parameter space
+  grid_search:
+    n_estimators: [100]
+    max_depth: [3]
+    learning_rate: [0.01]
+  cv_folds: 5
+
+# ------ Scaling ------
+scaling:
+  # For Logistic Regression and XGBoost
+  standard_scaler: true
+  # For LSTM
+  minmax_feature_range: [0, 1]
+
+# ------ Output / Visualization ------
+output:
+  # Directory for saved models and scalers
+  model_save_dir: "models/saved"
+  # Number of top features to show in prediction output
+  top_features_to_display: 3

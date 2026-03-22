@@ -1,0 +1,79 @@
+name: StockPredictor
+on:
+  push:
+    branches:
+      - '*'
+  pull_request:
+    branches:
+      - '*'
+  workflow_dispatch:
+jobs:
+  BuildAndTest:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Build Application
+      shell: bash
+      run: 
+        docker compose build
+
+    - name: Run Application
+      shell: bash
+      run: 
+        docker compose up -d
+
+    - name: List Directories
+      shell: bash
+      run: 
+        ls -la
+
+    - name: Wait for API and perform health check
+      shell: bash
+      run: |
+        echo "Waiting for API to be ready..."
+        for i in {1..30}; do
+          if curl -s --fail http://localhost:5000/health > /dev/null; then
+            echo "API is responding with HTTP 200"
+            break
+          fi
+          echo "Attempt $i/30: API not ready yet..."
+          sleep 2
+        done
+    
+        # Fetch the actual response and compare
+        RESPONSE=$(curl -s http://localhost:5000/health)
+        if [ "$RESPONSE" != '{"status":"ok"}' ]; then
+          echo "❌ Health check failed. Expected '{\"status\":\"ok\"}', got: $RESPONSE"
+          exit 1
+        else
+          echo "✅ Health check passed."
+        fi
+
+    - name: Test prediction endpoint
+      shell: bash
+      run: |
+        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:5000/predict?ticker=AAPL")
+        if [ "$HTTP_STATUS" -eq 200 ]; then
+          echo "✅ /predict returned 200 OK"
+        else
+          echo "❌ /predict returned $HTTP_STATUS"
+          docker logs "$(docker ps -q --filter 'name=stock-predictor')" 2>&1 | tail -50
+          docker exec stock-predictor ls -la /app/models/saved/ || echo "Directory not found"
+          docker exec stock-predictor ls -la /app
+          docker exec stock-predictor ls -la /app/models
+          exit 1
+        fi
+    
+    - name: Stop and Remove API Container
+      shell: bash
+      run: |
+        docker rm -f stock-predictor
+
+    - name: Push Docker Images to DockerHub
+      if: ${{ github.ref == 'refs/heads/main' }}
+      shell: bash
+      run: |
+        docker tag stock-predictor cherrytree811/stock-predictor:latest
+        docker login -u cherrytree811 -p ${{ secrets.DOCKER_CRED }}
+        docker push cherrytree811/stock-predictor:latest
