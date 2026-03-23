@@ -179,7 +179,7 @@ def train_logistic_regression(X_train, y_train, X_val, y_val,
         mlflow.log_artifact(scaler_path)
 
         # Log the model with signature
-        signature = infer_signature(X_train_sc, best_lr.predict(X_train_sc))
+        signature = infer_signature(X_train_sc, best_logistic_regression.predict(X_train_sc))
         mlflow.sklearn.log_model(
             best_logistic_regression,
             "logistic_model",
