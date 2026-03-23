@@ -160,7 +160,7 @@ def train_logistic_regression(X_train, y_train, X_val, y_val,
 
     print(f"  Best params: {best_params}")
     print(f"  CV accuracy: {cv_accuracy:.4f}")
-    print(f"  Val accuracy: {val_acc:.4f}")
+    print(f"  Val accuracy: {val_accuracy:.4f}")
 
     # Log to MLflow
     with mlflow.start_run(run_name="LogisticRegression", nested=True):
@@ -324,7 +324,7 @@ def train_xgboost(X_train, y_train_cls, y_train_reg,
         "regressor": regressor,
         "scaler": scaler,
         "best_params": best_params,
-        "val_acc": val_acc,
+        "val_acc": val_accuracy,
     }
 
 
