@@ -134,42 +134,42 @@ def train_logistic_regression(X_train, y_train, X_val, y_val,
     X_val_sc = scaler.transform(X_val)
 
     # Hyperparameter grid from config (or define here)
-    param_grid = {
+    parameters = {
         'C': [0.01, 0.1, 1, 10],
         'solver': ['lbfgs', 'liblinear'],
         'penalty': ['l2']
     }
 
-    lr = LogisticRegression(max_iter=1000, random_state=42)
+    logistic_regression = LogisticRegression(max_iter=1000, random_state=42)
 
     # Use TimeSeriesSplit for chronological cross‑validation
     tscv = TimeSeriesSplit(n_splits=5)
-    grid = GridSearchCV(lr, param_grid, cv=tscv, scoring='accuracy', n_jobs=-1)
+    grid = GridSearchCV(logistic_regression, parameters, cv=tscv, scoring='accuracy', n_jobs=-1)
     grid.fit(X_train_sc, y_train)
 
-    best_lr = grid.best_estimator_
+    best_logistic_regression = grid.best_estimator_
     best_params = grid.best_params_
-    cv_acc = grid.best_score_
+    cv_accuracy = grid.best_score_
 
     # Evaluate on validation set
-    y_pred_val = best_lr.predict(X_val_sc)
-    val_acc = accuracy_score(y_val, y_pred_val)
-    val_prec = precision_score(y_val, y_pred_val, zero_division=0)
-    val_rec = recall_score(y_val, y_pred_val, zero_division=0)
+    y_pred_val = best_logistic_regression.predict(X_val_sc)
+    val_accuracy = accuracy_score(y_val, y_pred_val)
+    val_precision = precision_score(y_val, y_pred_val, zero_division=0)
+    val_recall = recall_score(y_val, y_pred_val, zero_division=0)
     val_f1 = f1_score(y_val, y_pred_val, zero_division=0)
 
     print(f"  Best params: {best_params}")
-    print(f"  CV accuracy: {cv_acc:.4f}")
+    print(f"  CV accuracy: {cv_accuracy:.4f}")
     print(f"  Val accuracy: {val_acc:.4f}")
 
     # Log to MLflow
     with mlflow.start_run(run_name="LogisticRegression", nested=True):
         mlflow.log_params(best_params)
         mlflow.log_metrics({
-            "cv_accuracy": cv_acc,
-            "val_accuracy": val_acc,
-            "val_precision": val_prec,
-            "val_recall": val_rec,
+            "cv_accuracy": cv_accuracy,
+            "val_accuracy": val_accuracy,
+            "val_precision": val_precision,
+            "val_recall": val_recall,
             "val_f1": val_f1
         })
 
