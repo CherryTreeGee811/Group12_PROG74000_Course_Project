@@ -69,27 +69,27 @@ def predict():
     # 2. Compute technical indicators
     # ----------------------------------------------------------------------
     try:
-        feat_df = compute_indicators(price_df, drop_na=True)
+        feature_df = compute_indicators(price_df, drop_na=True)
     except Exception as e:
         return jsonify({"error": f"Failed to compute indicators: {e}"}), 500
 
-    if feat_df.empty:
+    if feature_df.empty:
         return jsonify({"error": "Not enough data to compute indicators"}), 422
 
     # ----------------------------------------------------------------------
     # 3. Build feature vector
     # ----------------------------------------------------------------------
     try:
-        feature_cols = get_feature_columns()
+        feature_columnss = get_feature_columns()
     except Exception as e:
         return jsonify({"error": f"Failed to load feature columns: {e}"}), 500
 
-    missing = [c for c in feature_cols if c not in feat_df.columns]
+    missing = [column for column in feature_columns if columm not in feat_df.columns]
     if missing:
         return jsonify({"error": f"Missing feature columns: {missing}"}), 500
 
-    latest_row = feat_df[feature_cols].iloc[[-1]].values
-    full_matrix = feat_df[feature_cols].values
+    latest_row = feature_df[feature_columns].iloc[[-1]].values
+    full_matrix = feature_df[feature_columns].values
 
     # ----------------------------------------------------------------------
     # 4. Run predictions
