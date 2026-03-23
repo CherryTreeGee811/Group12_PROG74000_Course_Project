@@ -181,21 +181,21 @@ def train_logistic_regression(X_train, y_train, X_val, y_val,
         # Log the model with signature
         signature = infer_signature(X_train_sc, best_lr.predict(X_train_sc))
         mlflow.sklearn.log_model(
-            best_lr,
+            best_logistic_regression,
             "logistic_model",
             signature=signature,
             input_example=X_train_sc[:5]
         )
 
     # Save locally for compatibility
-    joblib.dump(best_lr, os.path.join(save_dir, "logistic_regression.pkl"))
+    joblib.dump(best_logistic_regression, os.path.join(save_dir, "logistic_regression.pkl"))
     _save_artifact(scaler, "logistic_scaler.pkl", save_dir)
 
     return {
-        "model": best_lr,
+        "model": best_logistic_regression,
         "scaler": scaler,
         "best_params": best_params,
-        "val_acc": val_acc
+        "val_acc": val_accuracy
     }
 
 
@@ -211,7 +211,7 @@ def train_xgboost(X_train, y_train_cls, y_train_reg,
     print("=" * 60)
 
     xgb_cfg = cfg["xgboost"]
-    gs = xgb_cfg["grid_search"]
+    grid_search = xgb_cfg["grid_search"]
 
     # Scale features (optional for tree models, but we keep it)
     scaler = StandardScaler()
@@ -234,9 +234,9 @@ def train_xgboost(X_train, y_train_cls, y_train_reg,
         use_label_encoder=False
     )
     param_grid = {
-        "n_estimators": gs["n_estimators"],
-        "max_depth": gs["max_depth"],
-        "learning_rate": gs["learning_rate"],
+        "n_estimators": grid_search["n_estimators"],
+        "max_depth": grid_search["max_depth"],
+        "learning_rate": grid_search["learning_rate"],
     }
     tscv = TimeSeriesSplit(n_splits=xgb_cfg["cv_folds"])
     grid = GridSearchCV(
@@ -250,18 +250,18 @@ def train_xgboost(X_train, y_train_cls, y_train_reg,
 
     best_clf = grid.best_estimator_
     best_params = grid.best_params_
-    cv_acc = grid.best_score_
+    cv_accuracy = grid.best_score_
 
     # Evaluate classifier on validation set
     y_pred_val_cls = best_clf.predict(X_val_sc)
-    val_acc = accuracy_score(y_val_cls, y_pred_val_cls)
-    val_prec = precision_score(y_val_cls, y_pred_val_cls, zero_division=0)
-    val_rec = recall_score(y_val_cls, y_pred_val_cls, zero_division=0)
+    val_accuracy = accuracy_score(y_val_cls, y_pred_val_cls)
+    val_precision = precision_score(y_val_cls, y_pred_val_cls, zero_division=0)
+    val_recall = recall_score(y_val_cls, y_pred_val_cls, zero_division=0)
     val_f1 = f1_score(y_val_cls, y_pred_val_cls, zero_division=0)
 
     print(f"  Best params: {best_params}")
-    print(f"  Classifier CV accuracy: {cv_acc:.4f}")
-    print(f"  Classifier val accuracy: {val_acc:.4f}")
+    print(f"  Classifier CV accuracy: {cv_accuracy:.4f}")
+    print(f"  Classifier val accuracy: {val_accuracy:.4f}")
 
     # --- Regressor (re‑use best depth & estimators from classifier) ---
     print("  Training XGBRegressor…")
@@ -284,10 +284,10 @@ def train_xgboost(X_train, y_train_cls, y_train_reg,
         # Log parameters
         mlflow.log_params(best_params)
         mlflow.log_metrics({
-            "cv_accuracy": cv_acc,
-            "val_accuracy": val_acc,
-            "val_precision": val_prec,
-            "val_recall": val_rec,
+            "cv_accuracy": cv_accuracy,
+            "val_accuracy": val_accuracy,
+            "val_precision": val_precision,
+            "val_recall": val_recall,
             "val_f1": val_f1
         })
 
