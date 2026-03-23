@@ -128,7 +128,7 @@ def train_logistic_regression(X_train, y_train, X_val, y_val,
     print("[train] Model 1 — Logistic Regression")
     print("=" * 60)
 
-    # Scale features for logistic regression
+    # Scale features for using standardization
     scaler = StandardScaler()
     X_train_sc = scaler.fit_transform(X_train)
     X_val_sc = scaler.transform(X_val)
