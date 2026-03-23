@@ -80,11 +80,11 @@ def predict():
     # 3. Build feature vector
     # ----------------------------------------------------------------------
     try:
-        feature_columnss = get_feature_columns()
+        feature_columns = get_feature_columns()
     except Exception as e:
         return jsonify({"error": f"Failed to load feature columns: {e}"}), 500
 
-    missing = [column for column in feature_columns if columm not in feat_df.columns]
+    missing = [column for column in feature_columns if columm not in feature_df.columns]
     if missing:
         return jsonify({"error": f"Missing feature columns: {missing}"}), 500
 
