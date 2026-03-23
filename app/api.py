@@ -84,7 +84,7 @@ def predict():
     except Exception as e:
         return jsonify({"error": f"Failed to load feature columns: {e}"}), 500
 
-    missing = [column for column in feature_columns if columm not in feature_df.columns]
+    missing = [column for column in feature_columns if column not in feature_df.columns]
     if missing:
         return jsonify({"error": f"Missing feature columns: {missing}"}), 500
 
