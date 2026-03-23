@@ -78,10 +78,10 @@ def load_dataset() -> pd.DataFrame:
 
 def get_feature_columns(df: pd.DataFrame) -> list[str]:
     """Return the list of feature column names (excludes targets & Ticker)."""
-    return [c for c in df.columns if c not in _NON_FEATURE_COLS]
+    return [column for column in df.columns if column not in _NON_FEATURE_COLS]
 
 
-def chronological_split(df: pd.DataFrame, cfg: dict):
+def chronological_split(df: pd.DataFrame, config: dict):
     """
     Split into train / val / test **chronologically** (no shuffle).
 
@@ -89,12 +89,12 @@ def chronological_split(df: pd.DataFrame, cfg: dict):
     -------
     train_df, val_df, test_df
     """
-    train_r = cfg["split"]["train_ratio"]
-    val_r = cfg["split"]["val_ratio"]
+    train_ratio = config["split"]["train_ratio"]
+    val_ratio = config["split"]["val_ratio"]
 
     n = len(df)
-    train_end = int(n * train_r)
-    val_end = int(n * (train_r + val_r))
+    train_end = int(n * train_ratio)
+    val_end = int(n * (train_ratio + val_ratio))
 
     train_df = df.iloc[:train_end]
     val_df = df.iloc[train_end:val_end]
@@ -109,8 +109,8 @@ def _save_artifact(obj, filename: str, save_dir: str) -> str:
     """Pickle an object to save_dir/filename. Returns the full path."""
     os.makedirs(save_dir, exist_ok=True)
     path = os.path.join(save_dir, filename)
-    with open(path, "wb") as f:
-        pickle.dump(obj, f)
+    with open(path, "wb") as file:
+        pickle.dump(obj, file)
     print(f"  Saved → {path}")
     return path
 
@@ -120,7 +120,7 @@ def _save_artifact(obj, filename: str, save_dir: str) -> str:
 # ---------------------------------------------------------------------------
 
 def train_logistic_regression(X_train, y_train, X_val, y_val,
-                              feature_cols, cfg, save_dir):
+                              feature_cols, config, save_dir):
     """
     Train Logistic Regression with hyperparameter tuning.
     Logs everything to MLflow and saves the best model locally.
@@ -145,7 +145,7 @@ def train_logistic_regression(X_train, y_train, X_val, y_val,
 
     # Use TimeSeriesSplit for chronological cross‑validation
     tscv = TimeSeriesSplit(n_splits=5)
-    grid = GridSearchCV(logistic_regression, parameters, cv=tscv, scoring='accuracy', n_jobs=-1)
+    grid = GridSearchCV(logistic_regression, parameters, cv=tscv, scoring='accuracy')
     grid.fit(X_train_scaled, y_train)
 
     best_logistic_regression = grid.best_estimator_
@@ -153,11 +153,11 @@ def train_logistic_regression(X_train, y_train, X_val, y_val,
     cv_accuracy = grid.best_score_
 
     # Evaluate on validation set
-    y_pred_val = best_logistic_regression.predict(X_val_scaled)
-    val_accuracy = accuracy_score(y_val, y_pred_val)
-    val_precision = precision_score(y_val, y_pred_val, zero_division=0)
-    val_recall = recall_score(y_val, y_pred_val, zero_division=0)
-    val_f1 = f1_score(y_val, y_pred_val, zero_division=0)
+    y_predict_val = best_logistic_regression.predict(X_val_scaled)
+    val_accuracy = accuracy_score(y_val, y_predict_val)
+    val_precision = precision_score(y_val, y_predict_val, zero_division=0)
+    val_recall = recall_score(y_val, y_predict_val, zero_division=0)
+    val_f1 = f1_score(y_val, y_predict_val, zero_division=0)
 
     print(f"  Best params: {best_params}")
     print(f"  CV accuracy: {cv_accuracy:.4f}")
@@ -204,15 +204,15 @@ def train_logistic_regression(X_train, y_train, X_val, y_val,
 # Model 2 — XGBoost Classifier + Regressor
 # ---------------------------------------------------------------------------
 
-def train_xgboost(X_train, y_train_cls, y_train_reg,
-                  X_val, y_val_cls, y_val_reg,
-                  feature_cols, cfg, save_dir) -> dict:
+def train_xgboost(X_train, y_train_classification, y_train_regression,
+                  X_val, y_val_classification, y_val_regression,
+                  feature_cols, config, save_dir) -> dict:
     print("\n" + "=" * 60)
     print("[train] Model 2 — XGBoost (Classifier + Regressor)")
     print("=" * 60)
 
-    xgb_cfg = cfg["xgboost"]
-    grid_search = xgb_cfg["grid_search"]
+    xgb_configuration = config["xgboost"]
+    grid_search = xgb_configuration["grid_search"]
 
     # Scale features (optional for tree models, but we keep it)
     scaler = StandardScaler()
@@ -220,45 +220,42 @@ def train_xgboost(X_train, y_train_cls, y_train_reg,
     X_val_scaled = scaler.transform(X_val)
 
     # Compute scale_pos_weight for class imbalance
-    n_down = int((y_train_cls == 0).sum())
-    n_up = int((y_train_cls == 1).sum())
+    n_down = int((y_train_classification == 0).sum())
+    n_up = int((y_train_classification == 1).sum())
     spw = n_down / max(n_up, 1)
     print(f"  Class balance — DOWN: {n_down}, UP: {n_up}, "
           f"scale_pos_weight: {spw:.4f}")
 
     # --- Classifier with GridSearchCV + TimeSeriesSplit ---
-    base_clf = XGBClassifier(
-        random_state=xgb_cfg["random_state"],
+    base_classifier = XGBClassifier(
+        random_state=xgb_configuration["random_state"],
         eval_metric="logloss",
         scale_pos_weight=spw,
-        verbosity=0,
         use_label_encoder=False
     )
-    param_grid = {
+    parameters = {
         "n_estimators": grid_search["n_estimators"],
         "max_depth": grid_search["max_depth"],
         "learning_rate": grid_search["learning_rate"],
     }
-    tscv = TimeSeriesSplit(n_splits=xgb_cfg["cv_folds"])
+    tscv = TimeSeriesSplit(n_splits=xgb_configuration["cv_folds"])
     grid = GridSearchCV(
-        base_clf, param_grid,
+        base_classifier, param_grid=parameters,
         cv=tscv,
         scoring="accuracy",
-        n_jobs=-1,
-        verbose=0,
     )
-    grid.fit(X_train_scaled, y_train_cls)
+    grid.fit(X_train_scaled, y_train_classification)
 
-    best_clf = grid.best_estimator_
+    best_classifier = grid.best_estimator_
     best_params = grid.best_params_
     cv_accuracy = grid.best_score_
 
     # Evaluate classifier on validation set
-    y_pred_val_cls = best_clf.predict(X_val_scaled)
-    val_accuracy = accuracy_score(y_val_cls, y_pred_val_cls)
-    val_precision = precision_score(y_val_cls, y_pred_val_cls, zero_division=0)
-    val_recall = recall_score(y_val_cls, y_pred_val_cls, zero_division=0)
-    val_f1 = f1_score(y_val_cls, y_pred_val_cls, zero_division=0)
+    y_predict_val_cls = best_classifier.predict(X_val_scaled)
+    val_accuracy = accuracy_score(y_val_classification, y_predict_val_cls)
+    val_precision = precision_score(y_val_classification, y_predict_val_cls, zero_division=0)
+    val_recall = recall_score(y_val_classification, y_predict_val_cls, zero_division=0)
+    val_f1 = f1_score(y_val_classification, y_predict_val_cls, zero_division=0)
 
     print(f"  Best params: {best_params}")
     print(f"  Classifier CV accuracy: {cv_accuracy:.4f}")
@@ -266,18 +263,17 @@ def train_xgboost(X_train, y_train_cls, y_train_reg,
 
     # --- Regressor (re‑use best depth & estimators from classifier) ---
     print("  Training XGBRegressor…")
-    regressor = XGBRegressor(
+    xgb_regressor = XGBRegressor(
         n_estimators=best_params["n_estimators"],
         max_depth=best_params["max_depth"],
         learning_rate=best_params["learning_rate"],
-        random_state=xgb_cfg["random_state"],
-        verbosity=0,
+        random_state=xgb_configuration["random_state"],
     )
-    regressor.fit(X_train_scaled, y_train_reg)
+    xgb_regressor.fit(X_train_scaled, y_train_regression)
 
     # Save locally
-    _save_artifact(best_clf, "xgboost_classifier.pkl", save_dir)
-    _save_artifact(regressor, "xgboost_regressor.pkl", save_dir)
+    _save_artifact(best_classifier, "xgboost_classifier.pkl", save_dir)
+    _save_artifact(xgb_regressor, "xgboost_regressor.pkl", save_dir)
     _save_artifact(scaler, "xgboost_scaler.pkl", save_dir)
 
     # --- MLflow logging ---
@@ -297,20 +293,20 @@ def train_xgboost(X_train, y_train_cls, y_train_reg,
         mlflow.log_artifact(scaler_path)
 
         # Log classifier with signature
-        signature_clf = infer_signature(X_train_scaled, best_clf.predict(X_train_scaled))
+        signature_classifier = infer_signature(X_train_scaled, best_classifier.predict(X_train_scaled))
         mlflow.xgboost.log_model(
-            best_clf,
+            best_classifier,
             "xgboost_classifier",
-            signature=signature_clf,
+            signature=signature_classifier,
             input_example=X_train_scaled[:5]
         )
 
         # Log regressor
-        signature_reg = infer_signature(X_train_scaled, regressor.predict(X_train_scaled))
+        signature_regressor = infer_signature(X_train_scaled, xgb_regressor.predict(X_train_scaled))
         mlflow.xgboost.log_model(
-            regressor,
+            xgb_regressor,
             "xgboost_regressor",
-            signature=signature_reg,
+            signature=signature_regressor,
             input_example=X_train_scaled[:5]
         )
 
@@ -321,8 +317,8 @@ def train_xgboost(X_train, y_train_cls, y_train_reg,
         )
 
     return {
-        "classifier": best_clf,
-        "regressor": regressor,
+        "classifier": best_classifier,
+        "regressor": xgb_regressor,
         "scaler": scaler,
         "best_params": best_params,
         "val_acc": val_accuracy,
@@ -335,31 +331,31 @@ def train_xgboost(X_train, y_train_cls, y_train_reg,
 
 def train_all() -> dict:
     """Train all models and return a results dict."""
-    cfg = _load_config()
-    save_dir = os.path.join(_PROJECT_ROOT, cfg["output"]["model_save_dir"])
+    config = _load_config()
+    save_dir = os.path.join(_PROJECT_ROOT, config["output"]["model_save_dir"])
     os.makedirs(save_dir, exist_ok=True)
 
     # --- Load data ---
     print("[train] Loading training dataset…")
     df = load_dataset()
-    feature_cols = get_feature_columns(df)
+    feature_columns = get_feature_columns(df)
 
-    print(f"[train] Features ({len(feature_cols)}): {feature_cols[:5]}… "
-          f"(+{len(feature_cols)-5} more)")
+    print(f"[train] Features ({len(feature_columns)}): {feature_columns[:5]}… "
+          f"(+{len(feature_columns)-5} more)")
 
     # --- Chronological split ---
-    train_df, val_df, test_df = chronological_split(df, cfg)
+    train_df, val_df, test_df = chronological_split(df, config)
 
-    X_train = train_df[feature_cols].values
-    y_train_cls = train_df["Direction"].values
-    y_train_reg = train_df["Pct_Change"].values   # scale‑independent target
+    X_train = train_df[feature_columns].values
+    y_train_classification = train_df["Direction"].values
+    y_train_regression = train_df["Pct_Change"].values
 
-    X_val = val_df[feature_cols].values
-    y_val_cls = val_df["Direction"].values
-    y_val_reg = val_df["Pct_Change"].values
+    X_val = val_df[feature_columns].values
+    y_val_classification = val_df["Direction"].values
+    y_val_regression = val_df["Pct_Change"].values
 
     # Save feature column list and test set for evaluate.py
-    _save_artifact(feature_cols, "feature_columns.pkl", save_dir)
+    _save_artifact(feature_columns, "feature_columns.pkl", save_dir)
     test_df.to_csv(os.path.join(save_dir, "test_set.csv"))
     val_df.to_csv(os.path.join(save_dir, "val_set.csv"))
     print(f"  Saved feature_columns.pkl and test_set.csv")
@@ -371,15 +367,15 @@ def train_all() -> dict:
 
         # --- Model 1: Logistic Regression ---
         results["logistic"] = train_logistic_regression(
-            X_train, y_train_cls, X_val, y_val_cls,
-            feature_cols, cfg, save_dir
+            X_train, y_train_classification, X_val, y_val_classification,
+            feature_columns, config, save_dir
         )
 
         # --- Model 2: XGBoost ---
         results["xgboost"] = train_xgboost(
-            X_train, y_train_cls, y_train_reg,
-            X_val, y_val_cls, y_val_reg,
-            feature_cols, cfg, save_dir
+            X_train, y_train_classification, y_train_regression,
+            X_val, y_val_classification, y_val_regression,
+            feature_columns, config, save_dir
         )
 
     # --- Summary table ---
@@ -388,10 +384,10 @@ def train_all() -> dict:
     print("=" * 60)
     print(f"  {'Model':<25} {'Val Acc':>10}")
     print(f"  {'-'*25} {'-'*10}")
-    for name, res in results.items():
-        if res:
-            va = res.get("val_acc", 0)
-            print(f"  {name:<25} {va:>10.4f}")
+    for name, result in results.items():
+        if result:
+            validation_accuracy = result.get("val_acc", 0)
+            print(f"  {name:<25} {validation_accuracy:>10.4f}")
     print("=" * 60)
 
     return results
