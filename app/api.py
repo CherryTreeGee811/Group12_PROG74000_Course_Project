@@ -110,7 +110,14 @@ def predict():
         "xgboost": {
             "direction": str(xgb_result["direction"]),
             "confidence": float(xgb_result["confidence"]),
-            ]
+            "predicted_next_close": float(xgb_result["price"]),
+                "top_features": [
+                    {
+                        "feature": str(feature_name),
+                        "importance": float(importance)
+                    }
+                    for feature_name, importance in xgb_result["top_features"]
+                ]
         }
     }
 
