@@ -72,6 +72,7 @@ def load_dataset() -> pd.DataFrame:
         )
     df = pd.read_csv(_DATASET_PATH, index_col="Date", parse_dates=True)
     df.sort_index(inplace=True)
+    df.dropna(inplace=True)
     return df
 
 
@@ -130,8 +131,8 @@ def train_logistic_regression(X_train, y_train, X_val, y_val,
 
     # Scale features for using standardization
     scaler = StandardScaler()
-    X_train_sc = scaler.fit_transform(X_train)
-    X_val_sc = scaler.transform(X_val)
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_val_scaled = scaler.transform(X_val)
 
     # Hyperparameter grid from config (or define here)
     parameters = {
@@ -145,14 +146,14 @@ def train_logistic_regression(X_train, y_train, X_val, y_val,
     # Use TimeSeriesSplit for chronological cross‑validation
     tscv = TimeSeriesSplit(n_splits=5)
     grid = GridSearchCV(logistic_regression, parameters, cv=tscv, scoring='accuracy', n_jobs=-1)
-    grid.fit(X_train_sc, y_train)
+    grid.fit(X_train_scaled, y_train)
 
     best_logistic_regression = grid.best_estimator_
     best_params = grid.best_params_
     cv_accuracy = grid.best_score_
 
     # Evaluate on validation set
-    y_pred_val = best_logistic_regression.predict(X_val_sc)
+    y_pred_val = best_logistic_regression.predict(X_val_scaled)
     val_accuracy = accuracy_score(y_val, y_pred_val)
     val_precision = precision_score(y_val, y_pred_val, zero_division=0)
     val_recall = recall_score(y_val, y_pred_val, zero_division=0)
@@ -179,12 +180,12 @@ def train_logistic_regression(X_train, y_train, X_val, y_val,
         mlflow.log_artifact(scaler_path)
 
         # Log the model with signature
-        signature = infer_signature(X_train_sc, best_logistic_regression.predict(X_train_sc))
+        signature = infer_signature(X_train_scaled, best_logistic_regression.predict(X_train_scaled))
         mlflow.sklearn.log_model(
             best_logistic_regression,
             "logistic_model",
             signature=signature,
-            input_example=X_train_sc[:5]
+            input_example=X_train_scaled[:5]
         )
 
     # Save locally for compatibility
@@ -215,8 +216,8 @@ def train_xgboost(X_train, y_train_cls, y_train_reg,
 
     # Scale features (optional for tree models, but we keep it)
     scaler = StandardScaler()
-    X_train_sc = scaler.fit_transform(X_train)
-    X_val_sc = scaler.transform(X_val)
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_val_scaled = scaler.transform(X_val)
 
     # Compute scale_pos_weight for class imbalance
     n_down = int((y_train_cls == 0).sum())
@@ -246,14 +247,14 @@ def train_xgboost(X_train, y_train_cls, y_train_reg,
         n_jobs=-1,
         verbose=0,
     )
-    grid.fit(X_train_sc, y_train_cls)
+    grid.fit(X_train_scaled, y_train_cls)
 
     best_clf = grid.best_estimator_
     best_params = grid.best_params_
     cv_accuracy = grid.best_score_
 
     # Evaluate classifier on validation set
-    y_pred_val_cls = best_clf.predict(X_val_sc)
+    y_pred_val_cls = best_clf.predict(X_val_scaled)
     val_accuracy = accuracy_score(y_val_cls, y_pred_val_cls)
     val_precision = precision_score(y_val_cls, y_pred_val_cls, zero_division=0)
     val_recall = recall_score(y_val_cls, y_pred_val_cls, zero_division=0)
@@ -272,7 +273,7 @@ def train_xgboost(X_train, y_train_cls, y_train_reg,
         random_state=xgb_cfg["random_state"],
         verbosity=0,
     )
-    regressor.fit(X_train_sc, y_train_reg)
+    regressor.fit(X_train_scaled, y_train_reg)
 
     # Save locally
     _save_artifact(best_clf, "xgboost_classifier.pkl", save_dir)
@@ -296,21 +297,21 @@ def train_xgboost(X_train, y_train_cls, y_train_reg,
         mlflow.log_artifact(scaler_path)
 
         # Log classifier with signature
-        signature_clf = infer_signature(X_train_sc, best_clf.predict(X_train_sc))
+        signature_clf = infer_signature(X_train_scaled, best_clf.predict(X_train_scaled))
         mlflow.xgboost.log_model(
             best_clf,
             "xgboost_classifier",
             signature=signature_clf,
-            input_example=X_train_sc[:5]
+            input_example=X_train_scaled[:5]
         )
 
-        # Log regressor (optional) – we might not need it in the registry
-        signature_reg = infer_signature(X_train_sc, regressor.predict(X_train_sc))
+        # Log regressor
+        signature_reg = infer_signature(X_train_scaled, regressor.predict(X_train_scaled))
         mlflow.xgboost.log_model(
             regressor,
             "xgboost_regressor",
             signature=signature_reg,
-            input_example=X_train_sc[:5]
+            input_example=X_train_scaled[:5]
         )
 
         # Register the classifier as the primary model
