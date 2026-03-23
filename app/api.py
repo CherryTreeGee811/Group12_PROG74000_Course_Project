@@ -113,10 +113,10 @@ def predict():
             "predicted_next_close": float(xgb_result["price"]),
             "top_features": [
                 {
-                    "feature": str(name),
-                    "importance": float(imp)
+                    "feature": str(feature_name),
+                    "importance": float(importance)
                 }
-                for name, imp in xgb_result["top_features"]
+                for feature_name, importance in xgb_result["top_features"]
             ]
         }
     }
