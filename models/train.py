@@ -129,12 +129,16 @@ def train_logistic_regression(X_train, y_train, X_val, y_val,
     print("[train] Model 1 — Logistic Regression")
     print("=" * 60)
 
-    # Scale features for using standardization
+    # Scale features using standardization
+    # so features are weighed more equally and converge to a better solution faster (https://medium.com/@jazeem.lk/why-standardization-is-important-in-machine-learning-9b55a9e03d58)
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_val_scaled = scaler.transform(X_val)
 
-    # Hyperparameter grid from config (or define here)
+    # Hyperparameters to try
+    # C represents the inverse of regularization strength (Smaller c = stronger regularization = greater penalty for larger weights)
+    # Solvers are optimization algorithms.
+    # Penalty represents the method of regularization, in our case we are using ridge regression 
     parameters = {
         'C': [0.01, 0.1, 1, 10],
         'solver': ['lbfgs', 'liblinear'],
@@ -163,7 +167,7 @@ def train_logistic_regression(X_train, y_train, X_val, y_val,
     print(f"  CV accuracy: {cv_accuracy:.4f}")
     print(f"  Val accuracy: {val_accuracy:.4f}")
 
-    # Log to MLflow
+    # Log Logistic Regression Model to MLFlow
     with mlflow.start_run(run_name="LogisticRegression", nested=True):
         mlflow.log_params(best_params)
         mlflow.log_metrics({
@@ -214,7 +218,8 @@ def train_xgboost(X_train, y_train_classification, y_train_regression,
     xgb_configuration = config["xgboost"]
     grid_search = xgb_configuration["grid_search"]
 
-    # Scale features (optional for tree models, but we keep it)
+    # Scale features using standardization recommended
+    # for XGBoost to avoid numerical instability and slower convergence (https://medium.com/@indrajeetswain/8-common-xgboost-mistakes-every-data-scientist-should-avoid-0d9985e37968)
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_val_scaled = scaler.transform(X_val)
@@ -276,7 +281,7 @@ def train_xgboost(X_train, y_train_classification, y_train_regression,
     _save_artifact(xgb_regressor, "xgboost_regressor.pkl", save_dir)
     _save_artifact(scaler, "xgboost_scaler.pkl", save_dir)
 
-    # --- MLflow logging ---
+    # Log XGBoost Models to MLFlow
     with mlflow.start_run(run_name="XGBoost", nested=True):
         # Log parameters
         mlflow.log_params(best_params)
@@ -288,11 +293,11 @@ def train_xgboost(X_train, y_train_classification, y_train_regression,
             "val_f1": val_f1
         })
 
-        # Log scaler as artifact
+        # Log scaler as artifact locally
         scaler_path = os.path.join(save_dir, "xgboost_scaler.pkl")
         mlflow.log_artifact(scaler_path)
 
-        # Log classifier with signature
+        # Log the XGBoost classifier with signature
         signature_classifier = infer_signature(X_train_scaled, best_classifier.predict(X_train_scaled))
         mlflow.xgboost.log_model(
             best_classifier,
@@ -301,7 +306,7 @@ def train_xgboost(X_train, y_train_classification, y_train_regression,
             input_example=X_train_scaled[:5]
         )
 
-        # Log regressor
+        # Log the XGBoost regressor with signature
         signature_regressor = infer_signature(X_train_scaled, xgb_regressor.predict(X_train_scaled))
         mlflow.xgboost.log_model(
             xgb_regressor,
