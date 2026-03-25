@@ -65,16 +65,16 @@ def _ensure_xgboost_loaded():
     Load XGBoost classifier, regressor, scaler, and feature columns.
     All are loaded from local pickle files (not MLflow registry) to avoid path issues.
     """
-    if "xgb_clf" in _cache:
+    if "xgb_classifier" in _cache:
         return
 
     save_dir = _get_save_dir()
 
     # Load classifier, regressor, scaler, and feature columns from local files
-    _cache["xgb_clf"] = _load_artifact("xgboost_classifier.pkl", save_dir)
-    _cache["xgb_reg"] = _load_artifact("xgboost_regressor.pkl", save_dir)
+    _cache["xgb_classifier"] = _load_artifact("xgboost_classifier.pkl", save_dir)
+    _cache["xgb_regressor"] = _load_artifact("xgboost_regressor.pkl", save_dir)
     _cache["xgb_scaler"] = _load_artifact("xgboost_scaler.pkl", save_dir)
-    _cache["feature_cols"] = _load_artifact("feature_columns.pkl", save_dir)
+    _cache["feature_columns"] = _load_artifact("feature_columns.pkl", save_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +84,7 @@ def _ensure_xgboost_loaded():
 def get_feature_columns() -> list[str]:
     """Return the list of feature column names the models expect."""
     _ensure_xgboost_loaded()
-    return _cache["feature_cols"]
+    return _cache["feature_columns"]
 
 
 def predict_xgboost(feature_vector: np.ndarray,
@@ -110,10 +110,10 @@ def predict_xgboost(feature_vector: np.ndarray,
     """
     _ensure_xgboost_loaded()
 
-    clf = _cache["xgb_clf"]
-    reg = _cache["xgb_reg"]
+    classifier = _cache["xgb_classifier"]
+    regressor = _cache["xgb_regressor"]
     scaler = _cache["xgb_scaler"]
-    feat_cols = _cache["feature_cols"]
+    feature_columns = _cache["feature_columns"]
     cfg = _load_config()
     top_n = cfg["output"]["top_features_to_display"]
 
@@ -131,7 +131,7 @@ def predict_xgboost(feature_vector: np.ndarray,
     confidence = proba[direction_idx] * 100
 
     # Regression — model predicts percentage change, convert to price
-    pct_change = float(reg.predict(X_sc)[0])
+    pct_change = float(regressor.predict(X_sc)[0])
     if current_close is not None:
         price = current_close * (1 + pct_change / 100)
     else:
@@ -141,7 +141,7 @@ def predict_xgboost(feature_vector: np.ndarray,
     # Feature importance — top N
     importances = clf.feature_importances_
     top_idx = np.argsort(importances)[::-1][:top_n]
-    top_features = [(feat_cols[i], round(float(importances[i]), 4))
+    top_features = [(feature_columns[i], round(float(importances[i]), 4))
                     for i in top_idx]
 
     return {
