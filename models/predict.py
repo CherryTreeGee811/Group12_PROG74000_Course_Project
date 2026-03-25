@@ -125,10 +125,10 @@ def predict_xgboost(feature_vector: np.ndarray,
     X_sc = scaler.transform(X)
 
     # Classification
-    proba = clf.predict_proba(X_sc)[0]  # [prob_0, prob_1]
-    direction_idx = int(np.argmax(proba))
+    probability = classifier.predict_proba(X_sc)[0]  # [prob_0, prob_1]
+    direction_idx = int(np.argmax(probability))
     direction = "UP" if direction_idx == 1 else "DOWN"
-    confidence = proba[direction_idx] * 100
+    confidence = probability[direction_idx] * 100
 
     # Regression — model predicts percentage change, convert to price
     pct_change = float(regressor.predict(X_sc)[0])
@@ -139,7 +139,7 @@ def predict_xgboost(feature_vector: np.ndarray,
         price = pct_change
 
     # Feature importance — top N
-    importances = clf.feature_importances_
+    importances = classifier.feature_importances_
     top_idx = np.argsort(importances)[::-1][:top_n]
     top_features = [(feature_columns[i], round(float(importances[i]), 4))
                     for i in top_idx]
