@@ -72,6 +72,8 @@ def load_dataset() -> pd.DataFrame:
         )
     df = pd.read_csv(_DATASET_PATH, index_col="Date", parse_dates=True)
     df.sort_index(inplace=True)
+
+    # Handle missing values by dropping them from the dataset
     df.dropna(inplace=True)
     return df
 
