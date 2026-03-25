@@ -11,8 +11,8 @@ def evaluate_all():
     feature_cols = _load_artifact("feature_columns.pkl", save_dir)
 
     X_test = test_df[feature_cols].values
-    y_test_cls = test_df["Direction"].values
-    y_test_reg = test_df["Next_Close"].values
+    y_test_classification = test_df["Direction"].values
+    y_test_regression = test_df["Next_Close"].values
     y_test_pct = test_df["Pct_Change"].values
     test_close = test_df["Close"].values
 
@@ -37,7 +37,7 @@ def evaluate_all():
         X_test_lr = lr_scaler.transform(X_test)
         y_pred_lr = lr_model.predict(X_test_lr)
         all_metrics["Logistic Regression"] = _classification_metrics(
-            y_test_cls, y_pred_lr, "Logistic Regression")
+            y_test_classification, y_pred_lr, "Logistic Regression")
 
     # =================================================================
     # Model 2 — XGBoost Classifier + Regressor
@@ -46,22 +46,22 @@ def evaluate_all():
     print("[evaluate] Model 2 — XGBoost")
     print("=" * 60)
 
-    xgb_clf = _load_artifact("xgboost_classifier.pkl", save_dir)
-    xgb_reg = _load_artifact("xgboost_regressor.pkl", save_dir)
+    xgb_classifier = _load_artifact("xgboost_classifier.pkl", save_dir)
+    xgb_regressor = _load_artifact("xgboost_regressor.pkl", save_dir)
     xgb_scaler = _load_artifact("xgboost_scaler.pkl", save_dir)
 
     X_test_xgb = xgb_scaler.transform(X_test)
 
     # Classification
-    y_pred_xgb_cls = xgb_clf.predict(X_test_xgb)
+    y_pred_xgb_classification = xgb_classifier.predict(X_test_xgb)
     all_metrics["XGBoost Classifier"] = _classification_metrics(
-        y_test_cls, y_pred_xgb_cls, "XGBoost Classifier")
+        y_test_classification, y_pred_xgb_classification, "XGBoost Classifier")
 
     # Regression — model predicts pct change; convert back to prices
-    y_pred_pct = xgb_reg.predict(X_test_xgb)
-    y_pred_xgb_reg = test_close * (1 + y_pred_pct / 100)
+    y_pred_pct = xgb_regressor.predict(X_test_xgb)
+    y_pred_xgb_regressor = test_close * (1 + y_pred_pct / 100)
     reg_metrics = _regression_metrics(
-        y_test_reg, y_pred_xgb_reg, "XGBoost Regressor")
+        y_test_regression, y_pred_xgb_regressor, "XGBoost Regressor")
 
     # =================================================================
     # Print final summary
