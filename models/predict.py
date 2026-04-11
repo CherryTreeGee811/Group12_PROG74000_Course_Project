@@ -2,7 +2,7 @@
 Load saved models and return predictions for a given ticker.
 
 Primary interface:
-    predict_xgboost(feature_vector)  → direction, confidence, price, top features
+    predict_xgboost(feature_vector)  → direction, confidence, price
 
 Models are loaded lazily and cached.
 """
@@ -106,7 +106,6 @@ def predict_xgboost(feature_vector: np.ndarray,
         direction   : str   — "UP" or "DOWN"
         confidence  : float — probability (0–100 %)
         price       : float — predicted next-day closing price
-        top_features: list[tuple[str, float]] — top 3 (name, importance)
     """
     _ensure_xgboost_loaded()
 
@@ -138,17 +137,10 @@ def predict_xgboost(feature_vector: np.ndarray,
         # Fallback: return raw pct change if current_close not provided
         price = pct_change
 
-    # Feature importance — top N
-    importances = classifier.feature_importances_
-    top_idx = np.argsort(importances)[::-1][:top_n]
-    top_features = [(feature_columns[i], round(float(importances[i]), 4))
-                    for i in top_idx]
-
     return {
         "direction": direction,
         "confidence": round(confidence, 2),
-        "price": round(price, 2),
-        "top_features": top_features,
+        "price": round(price, 2)
     }
 
 
