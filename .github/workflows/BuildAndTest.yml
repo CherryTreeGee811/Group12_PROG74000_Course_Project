@@ -48,9 +48,13 @@ jobs:
     - name: Test prediction endpoint
       shell: bash
       run: |
-        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:5000/predict?ticker=AAPL")
+        HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" "http://localhost:5000/predict?ticker=AAPL")
+        HTTP_BODY=$(printf "%s" "$HTTP_RESPONSE" | sed '$d')
+        HTTP_STATUS=$(printf "%s" "$HTTP_RESPONSE" | tail -n1)
         if [ "$HTTP_STATUS" -eq 200 ]; then
           echo "✅ /predict returned 200 OK"
+          echo "Response body:"
+          printf "%s\n" "$HTTP_BODY"
         else
           echo "❌ /predict returned $HTTP_STATUS"
           docker logs "$(docker ps -q --filter 'name=stock-predictor')" 2>&1 | tail -50
