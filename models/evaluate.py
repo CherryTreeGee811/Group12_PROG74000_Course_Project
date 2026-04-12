@@ -59,12 +59,47 @@ def evaluate_all():
         y_pred_poly_regression = test_close * (1 + y_pred_poly_pct / 100)
         poly_reg_metrics = _regression_metrics(
             y_test_regression, y_pred_poly_regression, "Polynomial Regression")
+        
 
     # =================================================================
-    # Model 3 — XGBoost Classifier + Regressor
+    # Model 3 — Linear Regression Regressor (skip if artifacts missing)
     # =================================================================
     print("=" * 60)
-    print("[evaluate] Model 3 — XGBoost")
+    print("[evaluate] Model 3 — Linear Regression")
+    print("=" * 60)
+
+    lr_reg_model_path  = os.path.join(save_dir, "linear_regression.pkl")
+    lr_reg_scaler_path = os.path.join(save_dir, "linear_regression_scaler.pkl")
+    lin_reg_metrics = None
+
+    if not os.path.exists(lr_reg_model_path) or not os.path.exists(lr_reg_scaler_path):
+        print("  WARNING: Linear Regression artifacts not found. Skipping evaluation.")
+    else:
+        from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+        lr_reg_model  = _load_artifact("linear_regression.pkl",        save_dir)
+        lr_reg_scaler = _load_artifact("linear_regression_scaler.pkl", save_dir)
+
+        X_test_lr_reg     = lr_reg_scaler.transform(X_test)
+        y_pred_lr_reg_pct = lr_reg_model.predict(X_test_lr_reg)
+
+        # Convert pct change → dollar price (same as XGBoost regressor)
+        y_pred_lr_reg = test_close * (1 + y_pred_lr_reg_pct / 100)
+
+        lr_reg_metrics = {
+            "MAE":  round(mean_absolute_error(y_test_regression, y_pred_lr_reg), 4),
+            "RMSE": round(np.sqrt(mean_squared_error(y_test_regression, y_pred_lr_reg)), 4),
+            "R2":   round(r2_score(y_test_regression, y_pred_lr_reg), 4),
+        }
+        print("  Linear Regression Regression metrics:")
+        for k, v in lr_reg_metrics.items():
+            print(f"    {k}: {v}")
+
+
+    # =================================================================
+    # Model 4 — XGBoost Classifier + Regressor
+    # =================================================================
+    print("=" * 60)
+    print("[evaluate] Model 4 — XGBoost")
     print("=" * 60)
 
     xgb_classifier = _load_artifact("xgboost_classifier.pkl", save_dir)
@@ -95,6 +130,10 @@ def evaluate_all():
     if poly_reg_metrics:
         print("\n  Polynomial Regression:")
         for k, v in poly_reg_metrics.items():
+            print(f"    {k}: {v}")
+    if lin_reg_metrics:
+        print("\n  Linear Regression:")
+        for k, v in lin_reg_metrics.items():
             print(f"    {k}: {v}")
     print("\n  XGBoost Regression:")
     for k, v in reg_metrics.items():

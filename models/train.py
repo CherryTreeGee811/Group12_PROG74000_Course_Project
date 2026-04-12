@@ -4,6 +4,7 @@ Train all models and save them to models/saved/.
 Models trained:
   1. Logistic Regression (classification baseline)
   2. Polynomial Regression (regression baseline)
+  3. Linear Regression
   3. XGBoost Classifier + XGBoost Regressor (primary model)
 
 All scalers are fit on training data only and saved alongside the models.
@@ -299,15 +300,84 @@ def train_polynomial_regression(X_train, y_train, X_val, y_val,
     }
 
 
+
 # ---------------------------------------------------------------------------
-# Model 3 — XGBoost Classifier + Regressor
+# Model 3 —  Linear Regression 
+# ---------------------------------------------------------------------------
+def train_linear_regression(X_train, y_train_regression,
+                             X_val, y_val_regression,
+                             feature_cols, config, save_dir) -> dict:
+    """
+    Train a Linear Regression model to predict next-day percentage change.
+    Mirrors the XGBoost regressor: target is Pct_Change, output is converted
+    to a dollar price at inference time.
+    """
+    from sklearn.linear_model import LinearRegression
+    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+    import mlflow.sklearn
+
+    print("\n" + "=" * 60)
+    print("[train] Model 3 — Linear Regression")
+    print("=" * 60)
+
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_val_scaled = scaler.transform(X_val)
+
+    model = LinearRegression()
+    model.fit(X_train_scaled, y_train_regression)
+
+    y_pred_val = model.predict(X_val_scaled)
+    val_mae  = mean_absolute_error(y_val_regression, y_pred_val)
+    val_rmse = np.sqrt(mean_squared_error(y_val_regression, y_pred_val))
+    val_r2   = r2_score(y_val_regression, y_pred_val)
+
+    print(f"  Val MAE  : {val_mae:.4f}")
+    print(f"  Val RMSE : {val_rmse:.4f}")
+    print(f"  Val R²   : {val_r2:.4f}")
+
+    # Log to MLflow
+    with mlflow.start_run(run_name="LinearRegression", nested=True):
+        mlflow.log_params({"model_type": "LinearRegression"})
+        mlflow.log_metrics({
+            "val_mae": val_mae,
+            "val_rmse": val_rmse,
+            "val_r2": val_r2,
+        })
+        scaler_path = os.path.join(save_dir, "linear_regression_scaler.pkl")
+        joblib.dump(scaler, scaler_path)
+        mlflow.log_artifact(scaler_path)
+
+        signature = infer_signature(X_train_scaled, model.predict(X_train_scaled))
+        mlflow.sklearn.log_model(
+            model,
+            "linear_regression_model",
+            signature=signature,
+            input_example=X_train_scaled[:5]
+        )
+
+    # Save locally (same pattern as XGBoost)
+    _save_artifact(model,  "linear_regression.pkl",        save_dir)
+    _save_artifact(scaler, "linear_regression_scaler.pkl", save_dir)
+
+    return {
+        "model":    model,
+        "scaler":   scaler,
+        "val_mae":  val_mae,
+        "val_rmse": val_rmse,
+        "val_r2":   val_r2,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Model 4 — XGBoost Classifier + Regressor
 # ---------------------------------------------------------------------------
 
 def train_xgboost(X_train, y_train_classification, y_train_regression,
                   X_val, y_val_classification, y_val_regression,
                   feature_cols, config, save_dir) -> dict:
     print("\n" + "=" * 60)
-    print("[train] Model 3 — XGBoost (Classifier + Regressor)")
+    print("[train] Model 4 — XGBoost (Classifier + Regressor)")
     print("=" * 60)
 
     xgb_configuration = config["xgboost"]
@@ -477,7 +547,14 @@ def train_all() -> dict:
             feature_columns, config, save_dir
         )
 
-        # --- Model 3: XGBoost ---
+        # --- Model 3: Linear Regression ---
+        results["linear_regression"] = train_linear_regression(
+            X_train, y_train_regression,
+            X_val, y_val_regression,
+            feature_columns, config, save_dir
+        )
+
+        # --- Model 4: XGBoost ---
         results["xgboost"] = train_xgboost(
             X_train, y_train_classification, y_train_regression,
             X_val, y_val_classification, y_val_regression,
