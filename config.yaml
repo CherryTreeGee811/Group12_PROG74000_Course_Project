@@ -41,6 +41,10 @@ logistic_regression:
   max_iter: 1000
   random_state: 42
 
+# ------ Model: Polynomial Regression ------
+polynomial_regression:
+  degrees: [2, 3]
+
 # ------ Model: XGBoost ------
 xgboost:
   random_state: 42

@@ -40,10 +40,31 @@ def evaluate_all():
             y_test_classification, y_pred_lr, "Logistic Regression")
 
     # =================================================================
-    # Model 2 — XGBoost Classifier + Regressor
+    # Model 2 — Polynomial Regression (skip if artifacts missing)
     # =================================================================
     print("=" * 60)
-    print("[evaluate] Model 2 — XGBoost")
+    print("[evaluate] Model 2 — Polynomial Regression")
+    print("=" * 60)
+
+    poly_model_path = os.path.join(save_dir, "polynomial_regression.pkl")
+    poly_scaler_path = os.path.join(save_dir, "polynomial_scaler.pkl")
+    poly_reg_metrics = None
+    if not os.path.exists(poly_model_path) or not os.path.exists(poly_scaler_path):
+        print("  WARNING: Polynomial regression artifacts not found. Skipping evaluation.")
+    else:
+        poly_model = _load_artifact("polynomial_regression.pkl", save_dir)
+        poly_scaler = _load_artifact("polynomial_scaler.pkl", save_dir)
+        X_test_poly = poly_scaler.transform(X_test)
+        y_pred_poly_pct = poly_model.predict(X_test_poly)
+        y_pred_poly_regression = test_close * (1 + y_pred_poly_pct / 100)
+        poly_reg_metrics = _regression_metrics(
+            y_test_regression, y_pred_poly_regression, "Polynomial Regression")
+
+    # =================================================================
+    # Model 3 — XGBoost Classifier + Regressor
+    # =================================================================
+    print("=" * 60)
+    print("[evaluate] Model 3 — XGBoost")
     print("=" * 60)
 
     xgb_classifier = _load_artifact("xgboost_classifier.pkl", save_dir)
@@ -71,6 +92,10 @@ def evaluate_all():
     print("=" * 60)
     summary_df = pd.DataFrame(all_metrics).T
     print(summary_df.to_string())
+    if poly_reg_metrics:
+        print("\n  Polynomial Regression:")
+        for k, v in poly_reg_metrics.items():
+            print(f"    {k}: {v}")
     print("\n  XGBoost Regression:")
     for k, v in reg_metrics.items():
         print(f"    {k}: {v}")

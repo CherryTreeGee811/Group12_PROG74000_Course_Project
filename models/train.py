@@ -3,7 +3,8 @@ Train all models and save them to models/saved/.
 
 Models trained:
   1. Logistic Regression (classification baseline)
-  2. XGBoost Classifier + XGBoost Regressor (primary model)
+  2. Polynomial Regression (regression baseline)
+  3. XGBoost Classifier + XGBoost Regressor (primary model)
 
 All scalers are fit on training data only and saved alongside the models.
 Data is split chronologically (80/10/10) — never shuffled.
@@ -21,10 +22,15 @@ import pandas as pd
 import yaml
 import numpy as np
 
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LogisticRegression, LinearRegression
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score,
+    mean_absolute_error, mean_squared_error, r2_score
+)
+from sklearn.preprocessing import PolynomialFeatures
 
 import mlflow
 import mlflow.sklearn
@@ -207,14 +213,101 @@ def train_logistic_regression(X_train, y_train, X_val, y_val,
 
 
 # ---------------------------------------------------------------------------
-# Model 2 — XGBoost Classifier + Regressor
+# Model 2 — Polynomial Regression
+# ---------------------------------------------------------------------------
+
+def train_polynomial_regression(X_train, y_train, X_val, y_val,
+                                feature_cols, config, save_dir):
+    """
+    Train Polynomial Regression for percentage change prediction.
+    Logs everything to MLflow and saves the best model locally.
+    """
+    print("\n" + "=" * 60)
+    print("[train] Model 2 — Polynomial Regression")
+    print("=" * 60)
+
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_val_scaled = scaler.transform(X_val)
+
+    poly_config = config.get("polynomial_regression", {})
+    degrees = poly_config.get("degrees", [2, 3])
+
+    polynomial_regression = Pipeline([
+        ("poly", PolynomialFeatures(include_bias=False)),
+        ("linear", LinearRegression()),
+    ])
+
+    parameters = {"poly__degree": degrees}
+    tscv = TimeSeriesSplit(n_splits=5)
+    grid = GridSearchCV(
+        polynomial_regression,
+        param_grid=parameters,
+        cv=tscv,
+        scoring="neg_mean_squared_error",
+    )
+    grid.fit(X_train_scaled, y_train)
+
+    best_polynomial_regression = grid.best_estimator_
+    best_params = grid.best_params_
+    cv_rmse = np.sqrt(-grid.best_score_)
+
+    y_predict_val = best_polynomial_regression.predict(X_val_scaled)
+    val_mae = mean_absolute_error(y_val, y_predict_val)
+    val_rmse = np.sqrt(mean_squared_error(y_val, y_predict_val))
+    val_r2 = r2_score(y_val, y_predict_val)
+
+    print(f"  Best params: {best_params}")
+    print(f"  CV RMSE: {cv_rmse:.4f}")
+    print(f"  Val RMSE: {val_rmse:.4f}")
+
+    with mlflow.start_run(run_name="PolynomialRegression", nested=True):
+        mlflow.log_params(best_params)
+        mlflow.log_metrics({
+            "cv_rmse": cv_rmse,
+            "val_mae": val_mae,
+            "val_rmse": val_rmse,
+            "val_r2": val_r2
+        })
+
+        scaler_path = os.path.join(save_dir, "polynomial_scaler.pkl")
+        joblib.dump(scaler, scaler_path)
+        mlflow.log_artifact(scaler_path)
+
+        signature = infer_signature(
+            X_train_scaled,
+            best_polynomial_regression.predict(X_train_scaled)
+        )
+        mlflow.sklearn.log_model(
+            best_polynomial_regression,
+            "polynomial_model",
+            signature=signature,
+            input_example=X_train_scaled[:5]
+        )
+
+    joblib.dump(
+        best_polynomial_regression,
+        os.path.join(save_dir, "polynomial_regression.pkl")
+    )
+    _save_artifact(scaler, "polynomial_scaler.pkl", save_dir)
+
+    return {
+        "model": best_polynomial_regression,
+        "scaler": scaler,
+        "best_params": best_params,
+        "val_rmse": val_rmse
+    }
+
+
+# ---------------------------------------------------------------------------
+# Model 3 — XGBoost Classifier + Regressor
 # ---------------------------------------------------------------------------
 
 def train_xgboost(X_train, y_train_classification, y_train_regression,
                   X_val, y_val_classification, y_val_regression,
                   feature_cols, config, save_dir) -> dict:
     print("\n" + "=" * 60)
-    print("[train] Model 2 — XGBoost (Classifier + Regressor)")
+    print("[train] Model 3 — XGBoost (Classifier + Regressor)")
     print("=" * 60)
 
     xgb_configuration = config["xgboost"]
@@ -378,7 +471,13 @@ def train_all() -> dict:
             feature_columns, config, save_dir
         )
 
-        # --- Model 2: XGBoost ---
+        # --- Model 2: Polynomial Regression ---
+        results["polynomial"] = train_polynomial_regression(
+            X_train, y_train_regression, X_val, y_val_regression,
+            feature_columns, config, save_dir
+        )
+
+        # --- Model 3: XGBoost ---
         results["xgboost"] = train_xgboost(
             X_train, y_train_classification, y_train_regression,
             X_val, y_val_classification, y_val_regression,
@@ -389,12 +488,20 @@ def train_all() -> dict:
     print("\n" + "=" * 60)
     print("  TRAINING SUMMARY")
     print("=" * 60)
-    print(f"  {'Model':<25} {'Val Acc':>10}")
-    print(f"  {'-'*25} {'-'*10}")
+    print(f"  {'Model':<25} {'Metric':<12} {'Value':>10}")
+    print(f"  {'-'*25} {'-'*12} {'-'*10}")
     for name, result in results.items():
         if result:
-            validation_accuracy = result.get("val_acc", 0)
-            print(f"  {name:<25} {validation_accuracy:>10.4f}")
+            if "val_acc" in result:
+                metric_name = "Val Acc"
+                metric_value = result["val_acc"]
+            elif "val_rmse" in result:
+                metric_name = "Val RMSE"
+                metric_value = result["val_rmse"]
+            else:
+                metric_name = "N/A"
+                metric_value = 0.0
+            print(f"  {name:<25} {metric_name:<12} {metric_value:>10.4f}")
     print("=" * 60)
 
     return results
