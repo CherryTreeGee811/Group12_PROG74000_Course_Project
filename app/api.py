@@ -109,7 +109,6 @@ def predict():
         "current_close": float(current_close),
         "xgboost": {
             "direction": str(xgb_result["direction"]),
-            "confidence": float(xgb_result["confidence"]),
             "predicted_next_close": float(xgb_result["price"])
         }
     }
