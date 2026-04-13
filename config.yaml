@@ -40,10 +40,12 @@ split:
 logistic_regression:
   max_iter: 1000
   random_state: 42
+  C: [0.01, 1, 10]
+  l1_ratio: [0]
 
 # ------ Model: Polynomial Regression ------
 polynomial_regression:
-  degrees: [2, 3]
+  degrees: [1, 2]
 
 # ------ Model: XGBoost ------
 xgboost:
