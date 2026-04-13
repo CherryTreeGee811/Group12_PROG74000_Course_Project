@@ -236,20 +236,28 @@ def train_logistic_regression(X_train, y_train, X_val, y_val, X_test, y_test, co
         'l1_ratio': logistic_config.get('l1_ratio', [0, 0.5, 1])
     }
 
-    logistic_regression = LogisticRegression(
-        param_grid=parameters,
+    base_logistic_regression = LogisticRegression(
         max_iter=logistic_config.get('max_iter', 1000),
         random_state=logistic_config.get('random_state', 42),
     )
 
     # Use TimeSeriesSplit for chronological cross‑validation
     tscv = TimeSeriesSplit(n_splits=5)
-    grid = GridSearchCV(logistic_regression, parameters, cv=tscv, scoring='accuracy')
+    grid = GridSearchCV(base_logistic_regression, parameters, cv=tscv, scoring='accuracy')
     grid.fit(X_train_scaled, y_train)
 
-    best_logistic_regression = grid.best_estimator_
     best_params = grid.best_params_
     cv_accuracy = grid.best_score_
+
+    # Instantiate and fit the final model only after cross-validation
+    # identifies the best hyperparameters.
+    best_logistic_regression = LogisticRegression(
+        C=best_params["C"],
+        l1_ratio=best_params["l1_ratio"],
+        max_iter=logistic_config.get('max_iter', 1000),
+        random_state=logistic_config.get('random_state', 42),
+    )
+    best_logistic_regression.fit(X_train_scaled, y_train)
 
     # Evaluate on validation set
     y_predict_val = best_logistic_regression.predict(X_val_scaled)
