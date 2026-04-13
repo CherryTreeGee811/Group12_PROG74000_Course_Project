@@ -26,10 +26,7 @@ from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import GridSearchCV, TimeSeriesSplit, cross_val_score
-from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score, f1_score,
-    mean_absolute_error, mean_squared_error, r2_score
-)
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, mean_squared_error, r2_score
 from sklearn.preprocessing import PolynomialFeatures
 
 import mlflow
@@ -358,13 +355,11 @@ def train_polynomial_regression(X_train, y_train, X_val, y_val, X_test, y_test, 
 
     y_predict_val = best_polynomial_regression.predict(X_val_scaled)
     val_rmse = np.sqrt(mean_squared_error(y_val, y_predict_val))
-    val_mae = mean_absolute_error(y_val, y_predict_val)
     val_r2 = r2_score(y_val, y_predict_val)
 
     X_test_scaled = scaler.transform(X_test)
     y_predict_test = best_polynomial_regression.predict(X_test_scaled)
     test_rmse = np.sqrt(mean_squared_error(y_test, y_predict_test))
-    test_mae = mean_absolute_error(y_test, y_predict_test)
     test_r2 = r2_score(y_test, y_predict_test)
 
     print(f"  Best params: {best_params}")
@@ -376,10 +371,8 @@ def train_polynomial_regression(X_train, y_train, X_val, y_val, X_test, y_test, 
         mlflow.log_metrics({
             "cv_rmse": cv_rmse,
             "val_rmse": val_rmse,
-            "val_mae": val_mae,
             "val_r2": val_r2,
             "test_rmse": test_rmse,
-            "test_mae": test_mae,
             "test_r2": test_r2,
         })
 
@@ -402,85 +395,15 @@ def train_polynomial_regression(X_train, y_train, X_val, y_val, X_test, y_test, 
         "run_id": run_id,
         "cv_rmse": cv_rmse,
         "val_rmse": val_rmse,
-        "val_mae": val_mae,
         "val_r2": val_r2,
         "test_rmse": test_rmse,
-        "test_mae": test_mae,
         "test_r2": test_r2,
     }
 
 
 
 # ---------------------------------------------------------------------------
-# Model 3 —  Linear Regression 
-# ---------------------------------------------------------------------------
-def train_linear_regression(X_train, y_train_regression,
-                             X_val, y_val_regression,
-                             feature_cols, config, save_dir) -> dict:
-    """
-    Train a Linear Regression model to predict next-day percentage change.
-    Mirrors the XGBoost regressor: target is Pct_Change, output is converted
-    to a dollar price at inference time.
-    """
-    from sklearn.linear_model import LinearRegression
-    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-    import mlflow.sklearn
-
-    print("\n" + "=" * 60)
-    print("[train] Model 3 — Linear Regression")
-    print("=" * 60)
-
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_val_scaled = scaler.transform(X_val)
-
-    model = LinearRegression()
-    model.fit(X_train_scaled, y_train_regression)
-
-    y_pred_val = model.predict(X_val_scaled)
-    val_mae  = mean_absolute_error(y_val_regression, y_pred_val)
-    val_rmse = np.sqrt(mean_squared_error(y_val_regression, y_pred_val))
-    val_r2   = r2_score(y_val_regression, y_pred_val)
-
-    print(f"  Val MAE  : {val_mae:.4f}")
-    print(f"  Val RMSE : {val_rmse:.4f}")
-    print(f"  Val R²   : {val_r2:.4f}")
-
-    # Log to MLflow
-    with mlflow.start_run(run_name="LinearRegression", nested=True):
-        mlflow.log_params({"model_type": "LinearRegression"})
-        mlflow.log_metrics({
-            "val_mae": val_mae,
-            "val_rmse": val_rmse,
-            "val_r2": val_r2,
-        })
-        scaler_path = os.path.join(save_dir, "linear_regression_scaler.pkl")
-        joblib.dump(scaler, scaler_path)
-        mlflow.log_artifact(scaler_path)
-
-        signature = infer_signature(X_train_scaled, model.predict(X_train_scaled))
-        mlflow.sklearn.log_model(
-            model,
-            "linear_regression_model",
-            signature=signature,
-            input_example=X_train_scaled[:5]
-        )
-
-    # Save locally (same pattern as XGBoost)
-    _save_artifact(model,  "linear_regression.pkl",        save_dir)
-    _save_artifact(scaler, "linear_regression_scaler.pkl", save_dir)
-
-    return {
-        "model":    model,
-        "scaler":   scaler,
-        "val_mae":  val_mae,
-        "val_rmse": val_rmse,
-        "val_r2":   val_r2,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Model 4 — XGBoost Classifier + Regressor
+# Model 3 — XGBoost Classifier + Regressor
 # ---------------------------------------------------------------------------
 
 def train_xgboost(X_train, y_train_classification, y_train_regression,
@@ -601,12 +524,10 @@ def train_xgboost(X_train, y_train_classification, y_train_regression,
     # Evaluate regressor on validation set (same target as polynomial model: Pct_Change)
     y_predict_val_reg = xgb_regressor.predict(X_val_scaled)
     val_rmse = np.sqrt(mean_squared_error(y_val_regression, y_predict_val_reg))
-    val_mae = mean_absolute_error(y_val_regression, y_predict_val_reg)
     val_r2 = r2_score(y_val_regression, y_predict_val_reg)
 
     y_predict_test_reg = xgb_regressor.predict(X_test_scaled)
     test_rmse = np.sqrt(mean_squared_error(y_test_regression, y_predict_test_reg))
-    test_mae = mean_absolute_error(y_test_regression, y_predict_test_reg)
     test_r2 = r2_score(y_test_regression, y_predict_test_reg)
 
     print(f"  Regressor val RMSE: {val_rmse:.4f}")
@@ -620,10 +541,8 @@ def train_xgboost(X_train, y_train_classification, y_train_regression,
         mlflow.log_metrics({
             "cv_rmse": cv_rmse_reg,
             "val_rmse": val_rmse,
-            "val_mae": val_mae,
             "val_r2": val_r2,
             "test_rmse": test_rmse,
-            "test_mae": test_mae,
             "test_r2": test_r2,
         })
 
@@ -660,10 +579,8 @@ def train_xgboost(X_train, y_train_classification, y_train_regression,
             "run_id": regressor_run_id,
             "cv_rmse": cv_rmse_reg,
             "val_rmse": val_rmse,
-            "val_mae": val_mae,
             "val_r2": val_r2,
             "test_rmse": test_rmse,
-            "test_mae": test_mae,
             "test_r2": test_r2,
         },
     }
@@ -730,14 +647,7 @@ def train_all() -> dict:
             config, save_dir
         )
 
-        # --- Model 3: Linear Regression ---
-        results["linear_regression"] = train_linear_regression(
-            X_train, y_train_regression,
-            X_val, y_val_regression,
-            feature_columns, config, save_dir
-        )
-
-        # --- Model 4: XGBoost ---
+        # --- Model 3: XGBoost ---
         results["xgboost"] = train_xgboost(
             X_train, y_train_classification, y_train_regression,
             X_val, y_val_classification, y_val_regression,
