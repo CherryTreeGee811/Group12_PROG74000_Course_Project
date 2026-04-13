@@ -46,3 +46,5 @@ REQUIREMENTS.md
 # --- Jupyter ---
 .ipynb_checkpoints/
 notebooks/.ipynb_checkpoints/
+
+mlruns/

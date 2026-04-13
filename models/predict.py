@@ -207,7 +207,6 @@ def predict_xgboost(feature_vector: np.ndarray,
     -------
     dict with keys:
         direction   : str   — "UP" or "DOWN"
-        confidence  : float — probability (0–100 %)
         price       : float — predicted next-day closing price
     """
     _ensure_xgboost_loaded()
@@ -230,7 +229,6 @@ def predict_xgboost(feature_vector: np.ndarray,
     probability = classifier.predict_proba(X_sc)[0]  # [prob_0, prob_1]
     direction_idx = int(np.argmax(probability))
     direction = "UP" if direction_idx == 1 else "DOWN"
-    confidence = probability[direction_idx] * 100
 
     # Regression — model predicts percentage change, convert to price
     pct_change = float(regressor.predict(X_sc)[0])
@@ -242,7 +240,6 @@ def predict_xgboost(feature_vector: np.ndarray,
 
     return {
         "direction": direction,
-        "confidence": round(confidence, 2),
         "price": round(price, 2)
     }
 
