@@ -237,8 +237,7 @@ def train_logistic_regression(X_train, y_train, X_val, y_val, X_test, y_test, co
     }
 
     logistic_regression = LogisticRegression(
-        penalty='elasticnet',
-        solver='saga',
+        param_grid=parameters,
         max_iter=logistic_config.get('max_iter', 1000),
         random_state=logistic_config.get('random_state', 42),
     )
