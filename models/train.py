@@ -15,33 +15,26 @@ All training runs are logged with MLflow.
 
 import os
 import sys
-import warnings
-import pickle
-import joblib
+import json
 
 import pandas as pd
 import yaml
 import numpy as np
+import skops.io as sio
 
 from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
-from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score, f1_score,
-    mean_absolute_error, mean_squared_error, r2_score
-)
+from sklearn.model_selection import GridSearchCV, TimeSeriesSplit, cross_val_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, mean_squared_error, r2_score
 from sklearn.preprocessing import PolynomialFeatures
 
 import mlflow
-import mlflow.sklearn
-import mlflow.xgboost
-from mlflow.models.signature import infer_signature
+import mlflow.sklearn as mlflow_sklearn
+import mlflow.xgboost as mlflow_xgboost
 
 from xgboost import XGBClassifier, XGBRegressor
 import matplotlib.pyplot as plt
-
-warnings.filterwarnings("ignore", category=UserWarning)
 
 # ---------------------------------------------------------------------------
 # Paths & MLflow setup
@@ -55,7 +48,13 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 # Set MLflow tracking URI (can be overridden by env)
-mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns"))
+mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001"))
+_EXPERIMENT_NAME = os.getenv("MLFLOW_EXPERIMENT_NAME", "stock-predictor")
+_MODEL_NAME_PREFIX = os.getenv("MLFLOW_MODEL_NAME_PREFIX", "stock-predictor")
+
+
+def _registry_name(suffix: str) -> str:
+    return f"{_MODEL_NAME_PREFIX}-{suffix}"
 
 
 def _load_config() -> dict:
@@ -171,12 +170,40 @@ def chronological_split(df: pd.DataFrame, config: dict):
     return train_df, val_df, test_df
 
 
-def _save_artifact(obj, filename: str, save_dir: str) -> str:
-    """Pickle an object to save_dir/filename. Returns the full path."""
+def _save_feature_columns(feature_columns: list[str], save_dir: str) -> str:
+    """Save feature columns to YAML for evaluate/predict pipelines."""
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, "feature_columns.yaml")
+    with open(path, "w") as file:
+        yaml.safe_dump(feature_columns, file, sort_keys=False)
+    print(f"  Saved → {path}")
+    return path
+
+
+def _save_run_ids(run_ids: dict, save_dir: str) -> str:
+    """Persist MLflow run IDs so evaluation can attach test metrics to exact runs."""
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, "mlflow_run_ids.json")
+    with open(path, "w") as file:
+        json.dump(run_ids, file, indent=2)
+    print(f"  Saved → {path}")
+    return path
+
+
+def _save_skops(obj, filename: str, save_dir: str) -> str:
+    """Serialize an sklearn-compatible object using skops."""
     os.makedirs(save_dir, exist_ok=True)
     path = os.path.join(save_dir, filename)
-    with open(path, "wb") as file:
-        pickle.dump(obj, file)
+    sio.dump(obj, path)
+    print(f"  Saved → {path}")
+    return path
+
+
+def _save_xgb_model(obj, filename: str, save_dir: str) -> str:
+    """Serialize an XGBoost model using its native JSON format."""
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, filename)
+    obj.save_model(path)
     print(f"  Saved → {path}")
     return path
 
@@ -185,8 +212,7 @@ def _save_artifact(obj, filename: str, save_dir: str) -> str:
 # Model 1 — Logistic Regression
 # ---------------------------------------------------------------------------
 
-def train_logistic_regression(X_train, y_train, X_val, y_val,
-                              feature_cols, config, save_dir):
+def train_logistic_regression(X_train, y_train, X_val, y_val, X_test, y_test, config, save_dir):
     """
     Train Logistic Regression with hyperparameter tuning.
     Logs everything to MLflow and saves the best model locally.
@@ -201,17 +227,20 @@ def train_logistic_regression(X_train, y_train, X_val, y_val,
     X_train_scaled = scaler.fit_transform(X_train)
     X_val_scaled = scaler.transform(X_val)
 
-    # Hyperparameters to try
-    # C represents the inverse of regularization strength (Smaller c = stronger regularization = greater penalty for larger weights)
-    # Solvers are optimization algorithms.
-    # Penalty represents the method of regularization, in our case we are using ridge regression 
+    logistic_config = config.get('logistic_regression', {})
+
+    # C is the inverse of regularization strength.
+    # Use elasticnet regularization with saga solver to support l1_ratio tuning
     parameters = {
-        'C': [0.01, 0.1, 1, 10],
-        'solver': ['lbfgs', 'liblinear'],
-        'penalty': ['l2']
+        'C': logistic_config.get('C', [0.01, 1, 10]),
+        'l1_ratio': logistic_config.get('l1_ratio', [0, 0.5, 1])
     }
 
-    logistic_regression = LogisticRegression(max_iter=1000, random_state=42)
+    logistic_regression = LogisticRegression(
+        param_grid=parameters,
+        max_iter=logistic_config.get('max_iter', 1000),
+        random_state=logistic_config.get('random_state', 42),
+    )
 
     # Use TimeSeriesSplit for chronological cross‑validation
     tscv = TimeSeriesSplit(n_splits=5)
@@ -229,44 +258,58 @@ def train_logistic_regression(X_train, y_train, X_val, y_val,
     val_recall = recall_score(y_val, y_predict_val, zero_division=0)
     val_f1 = f1_score(y_val, y_predict_val, zero_division=0)
 
+    X_test_scaled = scaler.transform(X_test)
+    y_predict_test = best_logistic_regression.predict(X_test_scaled)
+    test_accuracy = accuracy_score(y_test, y_predict_test)
+    test_precision = precision_score(y_test, y_predict_test, zero_division=0)
+    test_recall = recall_score(y_test, y_predict_test, zero_division=0)
+    test_f1 = f1_score(y_test, y_predict_test, zero_division=0)
+
     print(f"  Best params: {best_params}")
     print(f"  CV accuracy: {cv_accuracy:.4f}")
     print(f"  Val accuracy: {val_accuracy:.4f}")
 
     # Log Logistic Regression Model to MLFlow
-    with mlflow.start_run(run_name="LogisticRegression", nested=True):
+    with mlflow.start_run(run_name="LogisticRegression", nested=True) as run:
         mlflow.log_params(best_params)
         mlflow.log_metrics({
             "cv_accuracy": cv_accuracy,
             "val_accuracy": val_accuracy,
             "val_precision": val_precision,
             "val_recall": val_recall,
-            "val_f1": val_f1
+            "val_f1": val_f1,
+            "test_accuracy": test_accuracy,
+            "test_precision": test_precision,
+            "test_recall": test_recall,
+            "test_f1": test_f1,
         })
 
-        # Log the scaler as an artifact
-        scaler_path = os.path.join(save_dir, "logistic_scaler.pkl")
-        joblib.dump(scaler, scaler_path)
-        mlflow.log_artifact(scaler_path)
-
-        # Log the model with signature
-        signature = infer_signature(X_train_scaled, best_logistic_regression.predict(X_train_scaled))
-        mlflow.sklearn.log_model(
-            best_logistic_regression,
-            "logistic_model",
-            signature=signature,
-            input_example=X_train_scaled[:5]
+        logistic_model_path = _save_skops(best_logistic_regression, "logistic_model.skops", save_dir)
+        logistic_scaler_path = _save_skops(scaler, "logistic_scaler.skops", save_dir)
+        mlflow.log_artifact(logistic_model_path)
+        mlflow.log_artifact(logistic_scaler_path)
+        mlflow_sklearn.log_model(
+            sk_model=best_logistic_regression,
+            name="logistic_regression_model",
+            registered_model_name=_registry_name("logistic"),
         )
 
-    # Save locally for compatibility
-    joblib.dump(best_logistic_regression, os.path.join(save_dir, "logistic_regression.pkl"))
-    _save_artifact(scaler, "logistic_scaler.pkl", save_dir)
+        run_id = run.info.run_id
 
     return {
         "model": best_logistic_regression,
         "scaler": scaler,
         "best_params": best_params,
-        "val_acc": val_accuracy
+        "run_id": run_id,
+        "cv_accuracy": cv_accuracy,
+        "val_acc": val_accuracy,
+        "val_precision": val_precision,
+        "val_recall": val_recall,
+        "val_f1": val_f1,
+        "test_accuracy": test_accuracy,
+        "test_precision": test_precision,
+        "test_recall": test_recall,
+        "test_f1": test_f1,
     }
 
 
@@ -274,8 +317,7 @@ def train_logistic_regression(X_train, y_train, X_val, y_val,
 # Model 2 — Polynomial Regression
 # ---------------------------------------------------------------------------
 
-def train_polynomial_regression(X_train, y_train, X_val, y_val,
-                                feature_cols, config, save_dir):
+def train_polynomial_regression(X_train, y_train, X_val, y_val, X_test, y_test, config, save_dir):
     """
     Train Polynomial Regression for percentage change prediction.
     Logs everything to MLflow and saves the best model locally.
@@ -289,7 +331,7 @@ def train_polynomial_regression(X_train, y_train, X_val, y_val,
     X_val_scaled = scaler.transform(X_val)
 
     poly_config = config.get("polynomial_regression", {})
-    degrees = poly_config.get("degrees", [2, 3])
+    degrees = poly_config.get("degrees", [1, 2])
 
     polynomial_regression = Pipeline([
         ("poly", PolynomialFeatures(include_bias=False)),
@@ -311,128 +353,62 @@ def train_polynomial_regression(X_train, y_train, X_val, y_val,
     cv_rmse = np.sqrt(-grid.best_score_)
 
     y_predict_val = best_polynomial_regression.predict(X_val_scaled)
-    val_mae = mean_absolute_error(y_val, y_predict_val)
     val_rmse = np.sqrt(mean_squared_error(y_val, y_predict_val))
     val_r2 = r2_score(y_val, y_predict_val)
+
+    X_test_scaled = scaler.transform(X_test)
+    y_predict_test = best_polynomial_regression.predict(X_test_scaled)
+    test_rmse = np.sqrt(mean_squared_error(y_test, y_predict_test))
+    test_r2 = r2_score(y_test, y_predict_test)
 
     print(f"  Best params: {best_params}")
     print(f"  CV RMSE: {cv_rmse:.4f}")
     print(f"  Val RMSE: {val_rmse:.4f}")
 
-    with mlflow.start_run(run_name="PolynomialRegression", nested=True):
+    with mlflow.start_run(run_name="PolynomialRegression", nested=True) as run:
         mlflow.log_params(best_params)
         mlflow.log_metrics({
             "cv_rmse": cv_rmse,
-            "val_mae": val_mae,
             "val_rmse": val_rmse,
-            "val_r2": val_r2
+            "val_r2": val_r2,
+            "test_rmse": test_rmse,
+            "test_r2": test_r2,
         })
 
-        scaler_path = os.path.join(save_dir, "polynomial_scaler.pkl")
-        joblib.dump(scaler, scaler_path)
-        mlflow.log_artifact(scaler_path)
-
-        signature = infer_signature(
-            X_train_scaled,
-            best_polynomial_regression.predict(X_train_scaled)
-        )
-        mlflow.sklearn.log_model(
-            best_polynomial_regression,
-            "polynomial_model",
-            signature=signature,
-            input_example=X_train_scaled[:5]
+        polynomial_model_path = _save_skops(best_polynomial_regression, "polynomial_regression.skops", save_dir)
+        polynomial_scaler_path = _save_skops(scaler, "polynomial_scaler.skops", save_dir)
+        mlflow.log_artifact(polynomial_model_path)
+        mlflow.log_artifact(polynomial_scaler_path)
+        mlflow_sklearn.log_model(
+            sk_model=best_polynomial_regression,
+            name="polynomial_regression_model",
+            registered_model_name=_registry_name("polynomial"),
         )
 
-    joblib.dump(
-        best_polynomial_regression,
-        os.path.join(save_dir, "polynomial_regression.pkl")
-    )
-    _save_artifact(scaler, "polynomial_scaler.pkl", save_dir)
+        run_id = run.info.run_id
 
     return {
         "model": best_polynomial_regression,
         "scaler": scaler,
         "best_params": best_params,
-        "val_rmse": val_rmse
-    }
-
-
-
-# ---------------------------------------------------------------------------
-# Model 3 —  Linear Regression 
-# ---------------------------------------------------------------------------
-def train_linear_regression(X_train, y_train_regression,
-                             X_val, y_val_regression,
-                             feature_cols, config, save_dir) -> dict:
-    """
-    Train a Linear Regression model to predict next-day percentage change.
-    Mirrors the XGBoost regressor: target is Pct_Change, output is converted
-    to a dollar price at inference time.
-    """
-    from sklearn.linear_model import LinearRegression
-    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-    import mlflow.sklearn
-
-    print("\n" + "=" * 60)
-    print("[train] Model 3 — Linear Regression")
-    print("=" * 60)
-
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_val_scaled = scaler.transform(X_val)
-
-    model = LinearRegression()
-    model.fit(X_train_scaled, y_train_regression)
-
-    y_pred_val = model.predict(X_val_scaled)
-    val_mae  = mean_absolute_error(y_val_regression, y_pred_val)
-    val_rmse = np.sqrt(mean_squared_error(y_val_regression, y_pred_val))
-    val_r2   = r2_score(y_val_regression, y_pred_val)
-
-    print(f"  Val MAE  : {val_mae:.4f}")
-    print(f"  Val RMSE : {val_rmse:.4f}")
-    print(f"  Val R²   : {val_r2:.4f}")
-
-    # Log to MLflow
-    with mlflow.start_run(run_name="LinearRegression", nested=True):
-        mlflow.log_params({"model_type": "LinearRegression"})
-        mlflow.log_metrics({
-            "val_mae": val_mae,
-            "val_rmse": val_rmse,
-            "val_r2": val_r2,
-        })
-        scaler_path = os.path.join(save_dir, "linear_regression_scaler.pkl")
-        joblib.dump(scaler, scaler_path)
-        mlflow.log_artifact(scaler_path)
-
-        signature = infer_signature(X_train_scaled, model.predict(X_train_scaled))
-        mlflow.sklearn.log_model(
-            model,
-            "linear_regression_model",
-            signature=signature,
-            input_example=X_train_scaled[:5]
-        )
-
-    # Save locally (same pattern as XGBoost)
-    _save_artifact(model,  "linear_regression.pkl",        save_dir)
-    _save_artifact(scaler, "linear_regression_scaler.pkl", save_dir)
-
-    return {
-        "model":    model,
-        "scaler":   scaler,
-        "val_mae":  val_mae,
+        "run_id": run_id,
+        "cv_rmse": cv_rmse,
         "val_rmse": val_rmse,
-        "val_r2":   val_r2,
+        "val_r2": val_r2,
+        "test_rmse": test_rmse,
+        "test_r2": test_r2,
     }
 
 
+
 # ---------------------------------------------------------------------------
-# Model 4 — XGBoost Classifier + Regressor
+# Model 3 — XGBoost Classifier + Regressor
 # ---------------------------------------------------------------------------
 
 def train_xgboost(X_train, y_train_classification, y_train_regression,
                   X_val, y_val_classification, y_val_regression,
-                  feature_cols, config, save_dir) -> dict:
+                  X_test, y_test_classification, y_test_regression,
+                  config, save_dir) -> dict:
     print("\n" + "=" * 60)
     print("[train] Model 4 — XGBoost (Classifier + Regressor)")
     print("=" * 60)
@@ -445,6 +421,7 @@ def train_xgboost(X_train, y_train_classification, y_train_regression,
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_val_scaled = scaler.transform(X_val)
+    X_test_scaled = scaler.transform(X_test)
 
     # Compute scale_pos_weight for class imbalance
     n_down = int((y_train_classification == 0).sum())
@@ -484,9 +461,44 @@ def train_xgboost(X_train, y_train_classification, y_train_regression,
     val_recall = recall_score(y_val_classification, y_predict_val_cls, zero_division=0)
     val_f1 = f1_score(y_val_classification, y_predict_val_cls, zero_division=0)
 
+    y_predict_test_cls = best_classifier.predict(X_test_scaled)
+    test_accuracy = accuracy_score(y_test_classification, y_predict_test_cls)
+    test_precision = precision_score(y_test_classification, y_predict_test_cls, zero_division=0)
+    test_recall = recall_score(y_test_classification, y_predict_test_cls, zero_division=0)
+    test_f1 = f1_score(y_test_classification, y_predict_test_cls, zero_division=0)
+
     print(f"  Best params: {best_params}")
     print(f"  Classifier CV accuracy: {cv_accuracy:.4f}")
     print(f"  Classifier val accuracy: {val_accuracy:.4f}")
+
+    classifier_path = _save_xgb_model(best_classifier, "xgboost_classifier.json", save_dir)
+    scaler_path = _save_skops(scaler, "xgboost_scaler.skops", save_dir)
+
+    # Log XGBoost classifier to MLFlow
+    with mlflow.start_run(run_name="XGBoostClassifier", nested=True) as run:
+        # Log parameters
+        mlflow.log_params(best_params)
+        mlflow.log_metrics({
+            "cv_accuracy": cv_accuracy,
+            "val_accuracy": val_accuracy,
+            "val_precision": val_precision,
+            "val_recall": val_recall,
+            "val_f1": val_f1,
+            "test_accuracy": test_accuracy,
+            "test_precision": test_precision,
+            "test_recall": test_recall,
+            "test_f1": test_f1,
+        })
+
+        mlflow.log_artifact(classifier_path)
+        mlflow.log_artifact(scaler_path)
+        mlflow_xgboost.log_model(
+            xgb_model=best_classifier,
+            name="xgb_classifier_model",
+            registered_model_name=_registry_name("xgboost-classifier"),
+        )
+
+        classifier_run_id = run.info.run_id
 
     # --- Regressor (re‑use best depth & estimators from classifier) ---
     print("  Training XGBRegressor…")
@@ -496,59 +508,80 @@ def train_xgboost(X_train, y_train_classification, y_train_regression,
         learning_rate=best_params["learning_rate"],
         random_state=xgb_configuration["random_state"],
     )
+
+    reg_cv_scores = cross_val_score(
+        xgb_regressor,
+        X_train_scaled,
+        y_train_regression,
+        cv=tscv,
+        scoring="neg_mean_squared_error",
+    )
+    cv_rmse_reg = np.sqrt(-reg_cv_scores.mean())
+
     xgb_regressor.fit(X_train_scaled, y_train_regression)
 
-    # Save locally
-    _save_artifact(best_classifier, "xgboost_classifier.pkl", save_dir)
-    _save_artifact(xgb_regressor, "xgboost_regressor.pkl", save_dir)
-    _save_artifact(scaler, "xgboost_scaler.pkl", save_dir)
+    # Evaluate regressor on validation set (same target as polynomial model: Pct_Change)
+    y_predict_val_reg = xgb_regressor.predict(X_val_scaled)
+    val_rmse = np.sqrt(mean_squared_error(y_val_regression, y_predict_val_reg))
+    val_r2 = r2_score(y_val_regression, y_predict_val_reg)
 
-    # Log XGBoost Models to MLFlow
-    with mlflow.start_run(run_name="XGBoost", nested=True):
-        # Log parameters
-        mlflow.log_params(best_params)
+    y_predict_test_reg = xgb_regressor.predict(X_test_scaled)
+    test_rmse = np.sqrt(mean_squared_error(y_test_regression, y_predict_test_reg))
+    test_r2 = r2_score(y_test_regression, y_predict_test_reg)
+
+    print(f"  Regressor val RMSE: {val_rmse:.4f}")
+    print(f"  Regressor val R2:   {val_r2:.4f}")
+    print(f"  Regressor CV RMSE:  {cv_rmse_reg:.4f}")
+
+    regressor_path = _save_xgb_model(xgb_regressor, "xgboost_regressor.json", save_dir)
+
+    # Log XGBoost regressor to MLFlow
+    with mlflow.start_run(run_name="XGBoostRegressor", nested=True) as run:
         mlflow.log_metrics({
-            "cv_accuracy": cv_accuracy,
-            "val_accuracy": val_accuracy,
-            "val_precision": val_precision,
-            "val_recall": val_recall,
-            "val_f1": val_f1
+            "cv_rmse": cv_rmse_reg,
+            "val_rmse": val_rmse,
+            "val_r2": val_r2,
+            "test_rmse": test_rmse,
+            "test_r2": test_r2,
         })
 
-        # Log scaler as artifact locally
-        scaler_path = os.path.join(save_dir, "xgboost_scaler.pkl")
+        mlflow.log_artifact(regressor_path)
         mlflow.log_artifact(scaler_path)
-
-        # Log the XGBoost classifier with signature
-        signature_classifier = infer_signature(X_train_scaled, best_classifier.predict(X_train_scaled))
-        mlflow.xgboost.log_model(
-            best_classifier,
-            "xgboost_classifier",
-            signature=signature_classifier,
-            input_example=X_train_scaled[:5]
+        mlflow_xgboost.log_model(
+            xgb_model=xgb_regressor,
+            name="xgb_regressor_model",
+            registered_model_name=_registry_name("xgboost-regressor"),
         )
 
-        # Log the XGBoost regressor with signature
-        signature_regressor = infer_signature(X_train_scaled, xgb_regressor.predict(X_train_scaled))
-        mlflow.xgboost.log_model(
-            xgb_regressor,
-            "xgboost_regressor",
-            signature=signature_regressor,
-            input_example=X_train_scaled[:5]
-        )
-
-        # Register the classifier as the primary model
-        mlflow.register_model(
-            f"runs:/{mlflow.active_run().info.run_id}/xgboost_classifier",
-            "stock_direction_predictor"
-        )
+        regressor_run_id = run.info.run_id
 
     return {
-        "classifier": best_classifier,
-        "regressor": xgb_regressor,
-        "scaler": scaler,
-        "best_params": best_params,
-        "val_acc": val_accuracy,
+        "classifier": {
+            "model": best_classifier,
+            "scaler": scaler,
+            "best_params": best_params,
+            "run_id": classifier_run_id,
+            "cv_accuracy": cv_accuracy,
+            "val_acc": val_accuracy,
+            "val_precision": val_precision,
+            "val_recall": val_recall,
+            "val_f1": val_f1,
+            "test_accuracy": test_accuracy,
+            "test_precision": test_precision,
+            "test_recall": test_recall,
+            "test_f1": test_f1,
+        },
+        "regressor": {
+            "model": xgb_regressor,
+            "scaler": scaler,
+            "best_params": best_params,
+            "run_id": regressor_run_id,
+            "cv_rmse": cv_rmse_reg,
+            "val_rmse": val_rmse,
+            "val_r2": val_r2,
+            "test_rmse": test_rmse,
+            "test_r2": test_r2,
+        },
     }
 
 
@@ -581,13 +614,20 @@ def train_all() -> dict:
     y_val_classification = val_df["Direction"].values
     y_val_regression = val_df["Pct_Change"].values
 
-    # Save feature column list and test set for evaluate.py
-    _save_artifact(feature_columns, "feature_columns.pkl", save_dir)
+    X_test = test_df[feature_columns].values
+    y_test_classification = test_df["Direction"].values
+    y_test_regression = test_df["Pct_Change"].values
+
+    # Save feature columns and sets for evaluate.py
+    _save_feature_columns(feature_columns, save_dir)
     test_df.to_csv(os.path.join(save_dir, "test_set.csv"))
     val_df.to_csv(os.path.join(save_dir, "val_set.csv"))
-    print(f"  Saved feature_columns.pkl and test_set.csv")
+    print("  Saved feature_columns.yaml, test_set.csv, and val_set.csv")
 
     results = {}
+
+    # Create/select experiment explicitly to avoid reliance on default experiment ID.
+    mlflow.set_experiment(_EXPERIMENT_NAME)
 
     # Start a parent MLflow run for the whole training process
     with mlflow.start_run(run_name="Training_Pipeline"):
@@ -595,48 +635,84 @@ def train_all() -> dict:
         # --- Model 1: Logistic Regression ---
         results["logistic"] = train_logistic_regression(
             X_train, y_train_classification, X_val, y_val_classification,
-            feature_columns, config, save_dir
+            X_test, y_test_classification,
+            config, save_dir
         )
 
         # --- Model 2: Polynomial Regression ---
         results["polynomial"] = train_polynomial_regression(
             X_train, y_train_regression, X_val, y_val_regression,
-            feature_columns, config, save_dir
+            X_test, y_test_regression,
+            config, save_dir
         )
 
-        # --- Model 3: Linear Regression ---
-        results["linear_regression"] = train_linear_regression(
-            X_train, y_train_regression,
-            X_val, y_val_regression,
-            feature_columns, config, save_dir
-        )
-
-        # --- Model 4: XGBoost ---
+        # --- Model 3: XGBoost ---
         results["xgboost"] = train_xgboost(
             X_train, y_train_classification, y_train_regression,
             X_val, y_val_classification, y_val_regression,
-            feature_columns, config, save_dir
+            X_test, y_test_classification, y_test_regression,
+            config, save_dir
         )
 
-    # --- Summary table ---
-    print("\n" + "=" * 60)
-    print("  TRAINING SUMMARY")
-    print("=" * 60)
-    print(f"  {'Model':<25} {'Metric':<12} {'Value':>10}")
-    print(f"  {'-'*25} {'-'*12} {'-'*10}")
-    for name, result in results.items():
-        if result:
-            if "val_acc" in result:
-                metric_name = "Val Acc"
-                metric_value = result["val_acc"]
-            elif "val_rmse" in result:
-                metric_name = "Val RMSE"
-                metric_value = result["val_rmse"]
-            else:
-                metric_name = "N/A"
-                metric_value = 0.0
-            print(f"  {name:<25} {metric_name:<12} {metric_value:>10.4f}")
-    print("=" * 60)
+    _save_run_ids(
+        {
+            "logistic": results["logistic"]["run_id"],
+            "polynomial": results["polynomial"]["run_id"],
+            "xgboost_classifier": results["xgboost"]["classifier"]["run_id"],
+            "xgboost_regressor": results["xgboost"]["regressor"]["run_id"],
+        },
+        save_dir,
+    )
+
+    # --- Classification comparison: Logistic vs XGBoost Classifier ---
+    if "logistic" in results and "xgboost" in results:
+        logistic = results["logistic"]
+        xgb = results["xgboost"]["classifier"]
+        print("\n" + "=" * 60)
+        print("  CLASSIFICATION COMPARISON")
+        print("=" * 60)
+        print(f"  {'Model':<25} {'CV Acc':>10} {'Val Acc':>10} {'Precision':>10} {'Recall':>10} {'F1':>10}")
+        print(f"  {'-'*25} {'-'*10} {'-'*10} {'-'*10} {'-'*10} {'-'*10}")
+        print(
+            f"  {'Logistic Regression':<25} "
+            f"{logistic.get('cv_accuracy', float('nan')):>10.4f} "
+            f"{logistic.get('val_acc', float('nan')):>10.4f} "
+            f"{logistic.get('val_precision', float('nan')):>10.4f} "
+            f"{logistic.get('val_recall', float('nan')):>10.4f} "
+            f"{logistic.get('val_f1', float('nan')):>10.4f}"
+        )
+        print(
+            f"  {'XGBoost Classifier':<25} "
+            f"{xgb.get('cv_accuracy', float('nan')):>10.4f} "
+            f"{xgb.get('val_acc', float('nan')):>10.4f} "
+            f"{xgb.get('val_precision', float('nan')):>10.4f} "
+            f"{xgb.get('val_recall', float('nan')):>10.4f} "
+            f"{xgb.get('val_f1', float('nan')):>10.4f}"
+        )
+        print("=" * 60)
+
+    # --- Regression comparison: Polynomial vs XGBoost Regressor ---
+    if "polynomial" in results and "xgboost" in results:
+        poly = results["polynomial"]
+        xgb = results["xgboost"]["regressor"]
+        print("\n" + "=" * 60)
+        print("  REGRESSION COMPARISON (Pct_Change)")
+        print("=" * 60)
+        print(f"  {'Model':<25} {'CV RMSE':>10} {'Val RMSE':>10} {'Val MAE':>10} {'Val R2':>10}")
+        print(f"  {'-'*25} {'-'*10} {'-'*10} {'-'*10} {'-'*10}")
+        print(
+            f"  {'Polynomial Regression':<25} "
+            f"{poly.get('cv_rmse', float('nan')):>10.4f} "
+            f"{poly.get('val_rmse', float('nan')):>10.4f} "
+            f"{poly.get('val_r2', float('nan')):>10.4f}"
+        )
+        print(
+            f"  {'XGBoost Regressor':<25} "
+            f"{xgb.get('cv_rmse', float('nan')):>10.4f} "
+            f"{xgb.get('val_rmse', float('nan')):>10.4f} "
+            f"{xgb.get('val_r2', float('nan')):>10.4f}"
+        )
+        print("=" * 60)
 
     return results
 
