@@ -21,7 +21,6 @@ COPY --from=builder /app/data/cache ./data/cache
 COPY --from=builder /app/models/saved ./models/saved
 COPY --from=builder /app/models/train.py ./models/
 COPY --from=builder /app/models/predict.py ./models/
-COPY --from=builder /app/models/evaluate.py ./models/
 COPY --from=builder /app/app/main.py ./app
 COPY --from=builder /app/app/api.py ./app
 RUN groupadd -g 1000 appuser && useradd -u 1000 -g appuser -m -s /bin/bash appuser
