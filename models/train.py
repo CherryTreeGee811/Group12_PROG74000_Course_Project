@@ -579,7 +579,7 @@ def train_all() -> dict:
     _save_feature_columns(feature_columns, save_dir)
     test_df.to_csv(os.path.join(save_dir, "test_set.csv"))
     val_df.to_csv(os.path.join(save_dir, "val_set.csv"))
-    print("  Saved feature_columns.yaml and test_set.csv")
+    print("  Saved feature_columns.yaml, test_set.csv, and val_set.csv")
 
     results = {}
 
