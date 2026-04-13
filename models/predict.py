@@ -10,20 +10,14 @@ Models are loaded lazily and cached.
 
 import os
 import sys
-import pickle
 import warnings
 
 import numpy as np
 import yaml
-import mlflow
+import skops.io as sio
+from xgboost import XGBClassifier, XGBRegressor
 
 warnings.filterwarnings("ignore", category=UserWarning)
-
-# ---------------------------------------------------------------------------
-# Paths & MLflow setup
-# ---------------------------------------------------------------------------
-# Set tracking URI (will be overridden by environment variable in production)
-mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns"))
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(_THIS_DIR)
@@ -38,16 +32,33 @@ def _load_config() -> dict:
         return yaml.safe_load(f)
 
 
-def _load_artifact(filename: str, save_dir: str):
-    """Load a pickle file from the given directory."""
-    path = os.path.join(save_dir, filename)
+def _load_feature_columns(save_dir: str) -> list[str]:
+    """Load feature columns from YAML."""
+    path = os.path.join(save_dir, "feature_columns.yaml")
     if not os.path.exists(path):
         raise FileNotFoundError(
-            f"Model artifact not found: {path}\n"
-            "Have you run  python models/train.py  yet?"
+            f"Feature columns file not found: {path}\n"
+            "Run  python models/train.py  to create MLflow artifacts first."
         )
-    with open(path, "rb") as f:
-        return pickle.load(f)
+    with open(path, "r") as f:
+        return yaml.safe_load(f) or []
+
+
+def _load_skops_model(path: str):
+    """Load a skops-serialized model or transformer."""
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Model artifact not found: {path}")
+    unknown_types = sio.get_untrusted_types(file=path)
+    return sio.load(path, trusted=unknown_types)
+
+
+def _load_xgb_model(path: str, model_cls):
+    """Load a native XGBoost JSON artifact into the provided model class."""
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Model artifact not found: {path}")
+    model = model_cls()
+    model.load_model(path)
+    return model
 
 
 # ---------------------------------------------------------------------------
@@ -64,18 +75,16 @@ def _get_save_dir() -> str:
 def _ensure_xgboost_loaded():
     """
     Load XGBoost classifier, regressor, scaler, and feature columns.
-    All are loaded from local pickle files (not MLflow registry) to avoid path issues.
+    Load from MLflow URIs using the saved manifest.
     """
     if "xgb_classifier" in _cache:
         return
 
     save_dir = _get_save_dir()
-
-    # Load classifier, regressor, scaler, and feature columns from local files
-    _cache["xgb_classifier"] = _load_artifact("xgboost_classifier.pkl", save_dir)
-    _cache["xgb_regressor"] = _load_artifact("xgboost_regressor.pkl", save_dir)
-    _cache["xgb_scaler"] = _load_artifact("xgboost_scaler.pkl", save_dir)
-    _cache["feature_columns"] = _load_artifact("feature_columns.pkl", save_dir)
+    _cache["xgb_classifier"] = _load_xgb_model(os.path.join(save_dir, "xgboost_classifier.json"), XGBClassifier)
+    _cache["xgb_regressor"] = _load_xgb_model(os.path.join(save_dir, "xgboost_regressor.json"), XGBRegressor)
+    _cache["xgb_scaler"] = _load_skops_model(os.path.join(save_dir, "xgboost_scaler.skops"))
+    _cache["feature_columns"] = _load_feature_columns(save_dir)
 
 
 def _ensure_polynomial_loaded():
@@ -84,10 +93,11 @@ def _ensure_polynomial_loaded():
         return
 
     save_dir = _get_save_dir()
-    _cache["poly_regression"] = _load_artifact("polynomial_regression.pkl", save_dir)
-    _cache["poly_scaler"] = _load_artifact("polynomial_scaler.pkl", save_dir)
+    _cache["poly_regression"] = _load_skops_model(os.path.join(save_dir, "polynomial_regression.skops"))
+    _cache["poly_scaler"] = _load_skops_model(os.path.join(save_dir, "polynomial_scaler.skops"))
+
     if "feature_columns" not in _cache:
-        _cache["feature_columns"] = _load_artifact("feature_columns.pkl", save_dir)
+        _cache["feature_columns"] = _load_feature_columns(save_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +108,7 @@ def get_feature_columns() -> list[str]:
     """Return the list of feature column names the models expect."""
     if "feature_columns" not in _cache:
         save_dir = _get_save_dir()
-        _cache["feature_columns"] = _load_artifact("feature_columns.pkl", save_dir)
+        _cache["feature_columns"] = _load_feature_columns(save_dir)
     return _cache["feature_columns"]
 
 
