@@ -39,6 +39,7 @@ import mlflow.xgboost
 from mlflow.models.signature import infer_signature
 
 from xgboost import XGBClassifier, XGBRegressor
+import matplotlib.pyplot as plt
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -82,8 +83,64 @@ def load_dataset() -> pd.DataFrame:
 
     # Handle missing values by dropping them from the dataset
     df.dropna(inplace=True)
+
+    # perform analysis and data visualizations
+    data_analysis_visualizations(df)
     return df
 
+def data_analysis_visualizations(df: pd.DataFrame):
+    print("Data Analysis and Visualizations")
+    print(df.describe())
+    df2 = df.copy()
+    df2 = df2.reset_index()
+
+    # a boxplot visualizing outliers in the main features
+    vis_df = df2[['Date', 'Open', 'High', 'Low', 'Close', 'Direction', 'Pct_Change']]
+    plt.boxplot(vis_df[['Open', 'High', 'Low', 'Close', 'Direction', 'Pct_Change']], tick_labels=['Open', 'High', 'Low', 'Close', 'Direction', 'Pct_Change'])
+    plt.title('Boxplot of Main Features of the Dataset')
+    plt.ylabel('Values')
+    plt.xlabel('Features')
+    plt.show()
+
+    # Histogram
+    # Open
+    plt.hist(vis_df['Open'])
+    plt.title('Frequency histogram for Open column')
+    plt.xlabel('Value')
+    plt.ylabel('Frequency')
+    plt.show()
+
+    # High
+    plt.hist(vis_df['High'])
+    plt.title('Frequency histogram for High column')
+    plt.xlabel('Value')
+    plt.ylabel('Frequency')
+    plt.show()
+
+    # Line Graph
+    # Low
+    plt.plot(vis_df['Date'],vis_df['Low'])
+    plt.title('Trend for Low column over time (1990 - 2026)')
+    plt.xlabel('Time')
+    plt.ylabel('Values')
+    plt.show()
+
+    # Close
+    plt.plot(vis_df['Date'],vis_df['Close'])
+    plt.title('Trend for Close column over time (1990 - 2026)')
+    plt.xlabel('Time')
+    plt.ylabel('Values')
+    plt.show()
+
+    # Scatter plot
+    # Correlation between Direction and Close
+    plt.scatter(x=vis_df['Open'], y=vis_df["Close"])
+    plt.title('Correlation between Open and Close columns')
+    plt.xlabel('Open')
+    plt.ylabel('Close')
+    plt.show()
+
+    print()
 
 def get_feature_columns(df: pd.DataFrame) -> list[str]:
     """Return the list of feature column names (excludes targets & Ticker)."""
