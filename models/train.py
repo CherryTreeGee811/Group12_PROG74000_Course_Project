@@ -229,8 +229,6 @@ def train_logistic_regression(X_train, y_train, X_val, y_val, X_test, y_test, co
 
     logistic_config = config.get('logistic_regression', {})
 
-    # C is the inverse of regularization strength.
-    # Use elasticnet regularization with saga solver to support l1_ratio tuning
     parameters = {
         'C': logistic_config.get('C', [0.01, 1, 10]),
         'l1_ratio': logistic_config.get('l1_ratio', [0, 0.5, 1])

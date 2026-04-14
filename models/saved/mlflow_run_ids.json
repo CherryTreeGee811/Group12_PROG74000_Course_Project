@@ -1,0 +1,6 @@
+{
+  "logistic": "f60905afb8094aa68a803f32a96481b8",
+  "polynomial": "83aa411c41b54d0ba005586dff3a281b",
+  "xgboost_classifier": "fabf79490f8f4c9fa939921ec7905b7d",
+  "xgboost_regressor": "5498522338dd4290a5568929fcc3a9d7"
+}
