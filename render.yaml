@@ -18,7 +18,7 @@ services:
   - type: web
     name: stock-predictor-mlflow
     runtime: python
-    plan: starter
+    plan: standard
     autoDeploy: true
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: >-
