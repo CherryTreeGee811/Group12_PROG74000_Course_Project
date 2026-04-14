@@ -46,8 +46,8 @@ services:
     schedule: "0 2 * * 0"
     autoDeploy: true
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    preDeployCommand: sh -c "export MLFLOW_TRACKING_URI=http://$MLFLOW_HOST:$MLFLOW_PORT && python models/train.py"
-    startCommand: sh -c "export MLFLOW_TRACKING_URI=http://$MLFLOW_HOST:$MLFLOW_PORT && python models/train.py"
+    preDeployCommand: sh -c "export MLFLOW_TRACKING_URI=http://$MLFLOW_HOST:$MLFLOW_PORT && python features/build_dataset.py && python models/train.py"
+    startCommand: sh -c "export MLFLOW_TRACKING_URI=http://$MLFLOW_HOST:$MLFLOW_PORT && python features/build_dataset.py && python models/train.py"
     envVars:
       - key: PYTHON_VERSION
         value: 3.13.3
