@@ -38,3 +38,28 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.13.3
+
+  - type: cron
+    name: stock-predictor-trainer
+    runtime: python
+    plan: starter
+    schedule: "0 2 * * 0"
+    autoDeploy: true
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    preDeployCommand: sh -c "export MLFLOW_TRACKING_URI=http://$MLFLOW_HOST:$MLFLOW_PORT && python models/train.py"
+    startCommand: sh -c "export MLFLOW_TRACKING_URI=http://$MLFLOW_HOST:$MLFLOW_PORT && python models/train.py"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.3
+      - key: MLFLOW_EXPERIMENT_NAME
+        value: stock-predictor
+      - key: MLFLOW_HOST
+        fromService:
+          type: web
+          name: stock-predictor-mlflow
+          property: host
+      - key: MLFLOW_PORT
+        fromService:
+          type: web
+          name: stock-predictor-mlflow
+          property: port
