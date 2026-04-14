@@ -50,8 +50,13 @@ polynomial_regression:
 # ------ Model: XGBoost ------
 xgboost:
   random_state: 42
-  # Grid search parameter space
-  grid_search:
+  # Grid search parameter space for classifier
+  classifier_grid_search:
+    n_estimators: [100]
+    max_depth: [3]
+    learning_rate: [0.01]
+  # Grid search parameter space for regressor
+  regressor_grid_search:
     n_estimators: [100]
     max_depth: [3]
     learning_rate: [0.01]

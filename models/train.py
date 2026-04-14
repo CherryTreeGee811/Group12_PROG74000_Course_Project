@@ -25,7 +25,7 @@ import skops.io as sio
 from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import GridSearchCV, TimeSeriesSplit, cross_val_score
+from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, mean_squared_error, r2_score
 from sklearn.preprocessing import PolynomialFeatures
 
@@ -48,7 +48,7 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 # Set MLflow tracking URI (can be overridden by env)
-mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001"))
+mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
 _EXPERIMENT_NAME = os.getenv("MLFLOW_EXPERIMENT_NAME", "stock-predictor")
 _MODEL_NAME_PREFIX = os.getenv("MLFLOW_MODEL_NAME_PREFIX", "stock-predictor")
 
@@ -420,7 +420,7 @@ def train_xgboost(X_train, y_train_classification, y_train_regression,
     print("=" * 60)
 
     xgb_configuration = config["xgboost"]
-    grid_search = xgb_configuration["grid_search"]
+    classifier_grid_search = xgb_configuration["classifier_grid_search"]
 
     # Scale features using standardization recommended
     # for XGBoost to avoid numerical instability and slower convergence (https://medium.com/@indrajeetswain/8-common-xgboost-mistakes-every-data-scientist-should-avoid-0d9985e37968)
@@ -444,9 +444,9 @@ def train_xgboost(X_train, y_train_classification, y_train_regression,
         use_label_encoder=False
     )
     parameters = {
-        "n_estimators": grid_search["n_estimators"],
-        "max_depth": grid_search["max_depth"],
-        "learning_rate": grid_search["learning_rate"],
+        "n_estimators": classifier_grid_search["n_estimators"],
+        "max_depth": classifier_grid_search["max_depth"],
+        "learning_rate": classifier_grid_search["learning_rate"],
     }
     tscv = TimeSeriesSplit(n_splits=xgb_configuration["cv_folds"])
     grid = GridSearchCV(
@@ -506,24 +506,31 @@ def train_xgboost(X_train, y_train_classification, y_train_regression,
 
         classifier_run_id = run.info.run_id
 
-    # --- Regressor (re‑use best depth & estimators from classifier) ---
+    # --- Regressor with its own GridSearchCV + TimeSeriesSplit ---
     print("  Training XGBRegressor…")
-    xgb_regressor = XGBRegressor(
-        n_estimators=best_params["n_estimators"],
-        max_depth=best_params["max_depth"],
-        learning_rate=best_params["learning_rate"],
+    regressor_grid_search = xgb_configuration.get("regressor_grid_search", classifier_grid_search)
+    regressor_parameters = {
+        "n_estimators": regressor_grid_search["n_estimators"],
+        "max_depth": regressor_grid_search["max_depth"],
+        "learning_rate": regressor_grid_search["learning_rate"],
+    }
+
+    base_regressor = XGBRegressor(
         random_state=xgb_configuration["random_state"],
     )
 
-    reg_cv_scores = cross_val_score(
-        xgb_regressor,
-        X_train_scaled,
-        y_train_regression,
+    reg_grid = GridSearchCV(
+        base_regressor,
+        param_grid=regressor_parameters,
         cv=tscv,
-        scoring="neg_mean_squared_error",
+        scoring="neg_root_mean_squared_error",
     )
-    cv_rmse_reg = np.sqrt(-reg_cv_scores.mean())
+    reg_grid.fit(X_train_scaled, y_train_regression)
+    xgb_regressor = reg_grid.best_estimator_
+    reg_best_params = reg_grid.best_params_
+    cv_rmse_reg = -reg_grid.best_score_
 
+    # Fit final selected estimator on full training split.
     xgb_regressor.fit(X_train_scaled, y_train_regression)
 
     # Evaluate regressor on validation set (same target as polynomial model: Pct_Change)
@@ -535,6 +542,7 @@ def train_xgboost(X_train, y_train_classification, y_train_regression,
     test_rmse = np.sqrt(mean_squared_error(y_test_regression, y_predict_test_reg))
     test_r2 = r2_score(y_test_regression, y_predict_test_reg)
 
+    print(f"  Regressor best params: {reg_best_params}")
     print(f"  Regressor val RMSE: {val_rmse:.4f}")
     print(f"  Regressor val R2:   {val_r2:.4f}")
     print(f"  Regressor CV RMSE:  {cv_rmse_reg:.4f}")
@@ -543,6 +551,7 @@ def train_xgboost(X_train, y_train_classification, y_train_regression,
 
     # Log XGBoost regressor to MLFlow
     with mlflow.start_run(run_name="XGBoostRegressor", nested=True) as run:
+        mlflow.log_params({f"reg_{k}": v for k, v in reg_best_params.items()})
         mlflow.log_metrics({
             "cv_rmse": cv_rmse_reg,
             "val_rmse": val_rmse,
@@ -580,7 +589,7 @@ def train_xgboost(X_train, y_train_classification, y_train_regression,
         "regressor": {
             "model": xgb_regressor,
             "scaler": scaler,
-            "best_params": best_params,
+            "best_params": reg_best_params,
             "run_id": regressor_run_id,
             "cv_rmse": cv_rmse_reg,
             "val_rmse": val_rmse,
