@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: stock-predictor-api
+    runtime: python
+    plan: starter
+    autoDeploy: true
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: python -m flask run --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.3
+      - key: FLASK_ENV
+        value: production
+      - key: FLASK_APP
+        value: app/api.py
+
+  - type: web
+    name: stock-predictor-mlflow
+    runtime: python
+    plan: starter
+    autoDeploy: true
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: >-
+      mkdir -p /var/lib/mlflow/artifacts &&
+      mlflow server
+      --host 0.0.0.0
+      --port $PORT
+      --allowed-hosts '*'
+      --backend-store-uri sqlite:////var/lib/mlflow/mlflow.db
+      --artifacts-destination file:///var/lib/mlflow/artifacts
+      --serve-artifacts
+    healthCheckPath: /
+    disk:
+      name: mlflow-data
+      mountPath: /var/lib/mlflow
+      sizeGB: 10
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.3
