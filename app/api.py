@@ -108,8 +108,10 @@ def predict():
         "ticker": ticker,
         "date": datetime.today().strftime("%Y-%m-%d"),
         "current_close": float(current_close),
+        "logistic regression": {
+            "direction": str(logistic_result["direction"])
+        },
         "xgboost": {
-            "direction": str(logistic_result["direction"]),
             "predicted_next_close": float(xgb_result["price"])
         }
     }
