@@ -157,7 +157,7 @@ def predict_polynomial_regression(feature_vector: np.ndarray,
         "price": round(price, 2)
     }
 
-
+   
 def predict_logistic_regression(feature_vector: np.ndarray) -> dict:
     """
     Run Logistic Regression prediction on a single feature vector.
@@ -169,7 +169,7 @@ def predict_logistic_regression(feature_vector: np.ndarray) -> dict:
     """
     _ensure_logistic_regression_loaded()
 
-    model  = _cache["log_regression"]
+    classifier = _cache["log_regression"]   # rename for clarity
     scaler = _cache["log_scaler"]
 
     X = np.asarray(feature_vector)
@@ -177,15 +177,13 @@ def predict_logistic_regression(feature_vector: np.ndarray) -> dict:
         X = X.reshape(1, -1)
 
     X_sc = scaler.transform(X)
-                                   
-   # Classification
+
     probability = classifier.predict_proba(X_sc)[0]  # [prob_0, prob_1]
     direction_idx = int(np.argmax(probability))
     direction = "UP" if direction_idx == 1 else "DOWN"
 
-    return {
-        "direction": direction
-    }
+    return {"direction": direction}
+
 
 
 def predict_xgboost(feature_vector: np.ndarray,
