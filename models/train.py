@@ -4,7 +4,6 @@ Train all models and save them to models/saved/.
 Models trained:
   1. Logistic Regression (classification baseline)
   2. Polynomial Regression (regression baseline)
-  3. Linear Regression
   3. XGBoost Classifier + XGBoost Regressor (primary model)
 
 All scalers are fit on training data only and saved alongside the models.
