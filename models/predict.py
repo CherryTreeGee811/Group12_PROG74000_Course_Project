@@ -167,7 +167,7 @@ def predict_logistic_regression(feature_vector: np.ndarray) -> dict:
     dict with keys:
         direction   : str   — "UP" or "DOWN"
     """
-    _ensure_linear_regression_loaded()
+    _ensure_logistic_regression_loaded()
 
     model  = _cache["log_regression"]
     scaler = _cache["log_scaler"]
