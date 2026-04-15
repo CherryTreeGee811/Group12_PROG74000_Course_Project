@@ -96,6 +96,7 @@ def predict():
     # ----------------------------------------------------------------------
     try:
         xgb_result = predict_xgboost(latest_row, current_close=current_close)
+        logistic_result = predict_logistic_regression(latest_row)
     except Exception as e:
         return jsonify({"error": f"XGBoost prediction failed: {e}"}), 500
 
@@ -108,7 +109,7 @@ def predict():
         "date": datetime.today().strftime("%Y-%m-%d"),
         "current_close": float(current_close),
         "xgboost": {
-            "direction": str(xgb_result["direction"]),
+            "direction": str(logistic_result["direction"]),
             "predicted_next_close": float(xgb_result["price"])
         }
     }
