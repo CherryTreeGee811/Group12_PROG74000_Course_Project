@@ -229,26 +229,33 @@ def train_logistic_regression(X_train, y_train, X_val, y_val, X_test, y_test, co
 
     logistic_config = config.get('logistic_regression', {})
 
+    # According to (https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html) 'C' is the inverse of regularization strength (smaller value equals greater regularization strength);
+    # for this we will try values 0.01, 1, and 10. Note that 1 is the default for 'C' if we do not specify.
+    # The default solver for LogisticRegression is lbfgs. For l1_ratio we are 0 is equivalent to L2 regularization, 1 is L1 regularization, and 0.5 is both L1 and L2 regularization.
     parameters = {
         'C': logistic_config.get('C', [0.01, 1, 10]),
         'l1_ratio': logistic_config.get('l1_ratio', [0, 0.5, 1])
     }
 
+    # Default max_iter value is 100 increasing this value allows more attempts (iterations) for the lbfgs solver to converge.
     base_logistic_regression = LogisticRegression(
         max_iter=logistic_config.get('max_iter', 1000),
         random_state=logistic_config.get('random_state', 42),
     )
 
     # Use TimeSeriesSplit for chronological cross‑validation
+    # Like KFold cross validation but it maintains the ordering of dates.
     tscv = TimeSeriesSplit(n_splits=5)
     grid = GridSearchCV(base_logistic_regression, parameters, cv=tscv, scoring='accuracy')
     grid.fit(X_train_scaled, y_train)
 
+    # Capture best hyperparameter values
     best_params = grid.best_params_
+
+    # Capture cross validation accuracy score
     cv_accuracy = grid.best_score_
 
-    # Instantiate and fit the final model only after cross-validation
-    # identifies the best hyperparameters.
+    # Instantiate and fit the final model using best hyperparameter values.
     best_logistic_regression = LogisticRegression(
         C=best_params["C"],
         l1_ratio=best_params["l1_ratio"],
@@ -257,13 +264,14 @@ def train_logistic_regression(X_train, y_train, X_val, y_val, X_test, y_test, co
     )
     best_logistic_regression.fit(X_train_scaled, y_train)
 
-    # Evaluate on validation set
+    # Check model performance using the evaluation set
     y_predict_val = best_logistic_regression.predict(X_val_scaled)
     val_accuracy = accuracy_score(y_val, y_predict_val)
     val_precision = precision_score(y_val, y_predict_val, zero_division=0)
     val_recall = recall_score(y_val, y_predict_val, zero_division=0)
     val_f1 = f1_score(y_val, y_predict_val, zero_division=0)
 
+    # Check model performance using the test set
     X_test_scaled = scaler.transform(X_test)
     y_predict_test = best_logistic_regression.predict(X_test_scaled)
     test_accuracy = accuracy_score(y_test, y_predict_test)
@@ -271,13 +279,18 @@ def train_logistic_regression(X_train, y_train, X_val, y_val, X_test, y_test, co
     test_recall = recall_score(y_test, y_predict_test, zero_division=0)
     test_f1 = f1_score(y_test, y_predict_test, zero_division=0)
 
+    # Print to the console the best parameters cv_accuracy, validation and test accuracy
     print(f"  Best params: {best_params}")
     print(f"  CV accuracy: {cv_accuracy:.4f}")
     print(f"  Val accuracy: {val_accuracy:.4f}")
+    print(f"  Val accuracy: {test_accuracy:.4f}")
 
     # Log Logistic Regression Model to MLFlow
     with mlflow.start_run(run_name="LogisticRegression", nested=True) as run:
+        # Log Best Tuned Values For Hyperparameters
         mlflow.log_params(best_params)
+
+        # Log Metrics
         mlflow.log_metrics({
             "cv_accuracy": cv_accuracy,
             "val_accuracy": val_accuracy,
@@ -290,16 +303,24 @@ def train_logistic_regression(X_train, y_train, X_val, y_val, X_test, y_test, co
             "test_f1": test_f1,
         })
 
+        # Serialize and save the logistic regression model to the save directory
         logistic_model_path = _save_skops(best_logistic_regression, "logistic_model.skops", save_dir)
-        logistic_scaler_path = _save_skops(scaler, "logistic_scaler.skops", save_dir)
+        # Upload the serialized model artifact to MLFlow
         mlflow.log_artifact(logistic_model_path)
+
+        # Serialize and save the StandardScaler fitted to the training data for later predictions
+        logistic_scaler_path = _save_skops(scaler, "logistic_scaler.skops", save_dir)
+        # Upload the serialized StandardScaler artifact to MLFlow
         mlflow.log_artifact(logistic_scaler_path)
+
+        # Upload The Same Logistic Regression Model to MLFlow Using MLFlow format to allow MLFlow loading/serving
         mlflow_sklearn.log_model(
             sk_model=best_logistic_regression,
             name="logistic_regression_model",
             registered_model_name=_registry_name("logistic"),
         )
 
+        # Capture the run ID to associate the model with it
         run_id = run.info.run_id
 
     return {
