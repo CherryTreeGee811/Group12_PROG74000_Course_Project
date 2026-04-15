@@ -100,16 +100,17 @@ def _ensure_polynomial_loaded():
         _cache["feature_columns"] = _load_feature_columns(save_dir)
 
 
-def _ensure_linear_regression_loaded():
-    """Load Linear Regression model and scaler into cache."""
-    if "lin_regression" in _cache:
+def _ensure_logistic_regression_loaded():
+    """Load Logistic Regression model and scaler into cache."""
+    if "log_regression" in _cache:
         return
 
     save_dir = _get_save_dir()
-    _cache["lin_regression"] = _load_artifact("linear_regression.pkl",        save_dir)
-    _cache["lin_scaler"]     = _load_artifact("linear_regression_scaler.pkl", save_dir)
+    _cache["log_regression"] = _load_skops_model(os.path.join(save_dir, "logistic_model.skops"))
+    _cache["log_scaler"] = _load_skops_model(os.path.join(save_dir, "logistic_scaler.skops"))
+
     if "feature_columns" not in _cache:
-        _cache["feature_columns"] = _load_artifact("feature_columns.pkl", save_dir)
+        _cache["feature_columns"] = _load_feature_columns(save_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -157,36 +158,34 @@ def predict_polynomial_regression(feature_vector: np.ndarray,
     }
 
 
-def predict_linear_regression(feature_vector: np.ndarray,
+def predict_logistic_regression(feature_vector: np.ndarray,
                                current_close: float | None = None) -> dict:
     """
-    Run Linear Regression prediction on a single feature vector.
+    Run Logistic Regression prediction on a single feature vector.
 
     Returns
     -------
     dict with keys:
-        pct_change: float — predicted percentage change
-        price     : float — predicted next-day closing price
+        direction   : str   — "UP" or "DOWN"
     """
     _ensure_linear_regression_loaded()
 
-    model  = _cache["lin_regression"]
-    scaler = _cache["lin_scaler"]
+    model  = _cache["log_regression"]
+    scaler = _cache["log_scaler"]
 
     X = np.asarray(feature_vector)
     if X.ndim == 1:
         X = X.reshape(1, -1)
 
     X_sc = scaler.transform(X)
-    pct_change = float(model.predict(X_sc)[0])
-    if current_close is not None:
-        price = current_close * (1 + pct_change / 100)
-    else:
-        price = pct_change
+                                   
+   # Classification
+    probability = classifier.predict_proba(X_sc)[0]  # [prob_0, prob_1]
+    direction_idx = int(np.argmax(probability))
+    direction = "UP" if direction_idx == 1 else "DOWN"
 
     return {
-        "pct_change": round(pct_change, 4),
-        "price": round(price, 2)
+        "direction": direction
     }
 
 
