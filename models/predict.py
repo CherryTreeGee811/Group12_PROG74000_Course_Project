@@ -158,8 +158,7 @@ def predict_polynomial_regression(feature_vector: np.ndarray,
     }
 
 
-def predict_logistic_regression(feature_vector: np.ndarray,
-                               current_close: float | None = None) -> dict:
+def predict_logistic_regression(feature_vector: np.ndarray) -> dict:
     """
     Run Logistic Regression prediction on a single feature vector.
 
