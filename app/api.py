@@ -26,6 +26,7 @@ from data.fetch_price import fetch_price_data
 from features.technical_indicators import compute_indicators
 from models.predict import (
     predict_xgboost,
+    predict_logistic_regression,
     get_feature_columns,
 )
 
